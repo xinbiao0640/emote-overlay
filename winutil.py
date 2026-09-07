@@ -61,3 +61,47 @@ def is_typing():
         return True
     # 存在可见文本光标也视为正在输入（覆盖浏览器 / Electron 等自绘控件）
     return bool(caret)
+
+
+def hide_taskbar_button(hwnd):
+    """通过 ITaskbarList::DeleteTab 隐藏任务栏按钮。
+
+    这样窗口保持「普通顶层窗口」（可被 OBS 枚举到），同时不出现在任务栏。
+    失败时静默忽略（仅多出一个任务栏按钮）。
+    """
+    try:
+        ole32 = ctypes.windll.ole32
+
+        class GUID(ctypes.Structure):
+            _fields_ = [
+                ("Data1", ctypes.c_uint32),
+                ("Data2", ctypes.c_uint16),
+                ("Data3", ctypes.c_uint16),
+                ("Data4", ctypes.c_uint8 * 8),
+            ]
+
+        CLSID_TaskbarList = GUID(
+            0x56FDF344, 0xFD6D, 0x11D0,
+            (ctypes.c_uint8 * 8)(0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90),
+        )
+        IID_ITaskbarList = GUID(
+            0x56FDF342, 0xFD6D, 0x11D0,
+            (ctypes.c_uint8 * 8)(0x95, 0x8A, 0x00, 0x60, 0x97, 0xC9, 0xA0, 0x90),
+        )
+
+        ole32.CoInitialize(None)
+        p = ctypes.c_void_p()
+        hr = ole32.CoCreateInstance(
+            ctypes.byref(CLSID_TaskbarList), None, 1,
+            ctypes.byref(IID_ITaskbarList), ctypes.byref(p),
+        )
+        if hr != 0 or not p.value:
+            return
+        vtable = ctypes.cast(p.value, ctypes.POINTER(ctypes.POINTER(ctypes.c_void_p)))
+        # ITaskbarList vtable: 0 QI,1 AddRef,2 Release,3 HrInit,4 AddTab,5 DeleteTab,...
+        delete_tab = ctypes.WINFUNCTYPE(ctypes.c_long, ctypes.c_void_p, ctypes.c_void_p)(vtable[0][5])
+        delete_tab(p, wintypes.HWND(hwnd))
+        release = ctypes.WINFUNCTYPE(ctypes.c_ulong, ctypes.c_void_p)(vtable[0][2])
+        release(p)
+    except Exception:
+        pass

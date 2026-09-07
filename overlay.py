@@ -1,5 +1,6 @@
 """全屏透明置顶 overlay：平时点击透传，按热键弹出表情滚轮，选中后弹出表情。"""
 import ctypes
+import random
 
 from PySide6.QtCore import Qt, QRect, QTimer
 from PySide6.QtGui import QGuiApplication, QCursor
@@ -7,6 +8,7 @@ from PySide6.QtWidgets import QWidget
 
 from wheel import EmoteWheel, angle_index
 from emote import EmoteDisplay
+from winutil import hide_taskbar_button
 
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
@@ -15,15 +17,27 @@ WS_EX_NOACTIVATE = 0x08000000
 SWP_NOMOVE = 0x0002
 SWP_NOSIZE = 0x0001
 SWP_NOACTIVATE = 0x0010
+SWP_NOZORDER = 0x0004
 SWP_FRAMECHANGED = 0x0020
 
 
+def _init_window_styles(hwnd: int):
+    """初始化窗口扩展样式（分层透明 + 不激活 + 点击透传），只调用一次。"""
+    user32 = ctypes.windll.user32
+    ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
+    ex = ex | WS_EX_LAYERED | WS_EX_NOACTIVATE | WS_EX_TRANSPARENT
+    user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
+    user32.SetWindowPos(
+        hwnd, 0, 0, 0, 0, 0,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+    )
+
+
 def _apply_click_through(hwnd: int, enabled: bool):
-    """直接改 Win32 扩展样式，运行时可靠地切换「点击透传」。
+    """运行时切换「点击透传」：只翻转 WS_EX_TRANSPARENT，不做 frame 重算（更快）。
     enabled=True 时鼠标点击穿透到下层应用；False 时接收输入（滚轮打开时）。"""
     user32 = ctypes.windll.user32
     ex = user32.GetWindowLongW(hwnd, GWL_EXSTYLE)
-    ex = ex | WS_EX_LAYERED | WS_EX_NOACTIVATE
     if enabled:
         ex = ex | WS_EX_TRANSPARENT
     else:
@@ -31,7 +45,7 @@ def _apply_click_through(hwnd: int, enabled: bool):
     user32.SetWindowLongW(hwnd, GWL_EXSTYLE, ex)
     user32.SetWindowPos(
         hwnd, 0, 0, 0, 0, 0,
-        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE | SWP_NOZORDER,
     )
 
 
@@ -43,10 +57,10 @@ class Overlay(QWidget):
         self._display_cfg = dict(config.get("display", {}))
         self._wheel_cfg = dict(config.get("wheel", {}))
 
+        # 注意：不能用 Qt.Tool，否则会加 WS_EX_TOOLWINDOW，导致 OBS 窗口采集枚举不到。
         self.setWindowFlags(
             Qt.FramelessWindowHint
             | Qt.WindowStaysOnTopHint
-            | Qt.Tool
             | Qt.WindowDoesNotAcceptFocus
         )
         # 标题用于 OBS「窗口采集」枚举到本窗口（无边框下不会显示出来）
@@ -60,12 +74,19 @@ class Overlay(QWidget):
         self._wheel = None
         self._wheel_center = None
         self._hover_timer = None
+        self._last_emote = None
+        self._last_cursor = None
+
         self._emote_display = EmoteDisplay(self)
+        self._emote_display.setGeometry(self.rect())
+        self._emote_display.show()
 
         self.show()
         self.raise_()
-        # 初始状态：点击透传
-        _apply_click_through(int(self.winId()), True)
+        # 初始状态：点击透传 + 分层透明
+        _init_window_styles(int(self.winId()))
+        # 隐藏任务栏按钮（等窗口注册后再删）
+        QTimer.singleShot(0, lambda: hide_taskbar_button(int(self.winId())))
 
     # ---- 配置 ----
     def set_groups(self, groups):
@@ -145,12 +166,21 @@ class Overlay(QWidget):
         self._wheel.set_hover_index(angle_index(dx, dy, n))
 
     def release_wheel(self):
-        """松开呼出键：选中当前高亮的表情并关闭滚轮。"""
+        """松开呼出键：选中当前高亮的表情并关闭滚轮。
+
+        若松开时鼠标停在中心（无方向）且与上次发送位置相同，则重复发送上一个表情，
+        方便连续快速发送同一个表情。
+        """
         if not self._wheel_visible():
             return
         emote = self._wheel.current_emote()
+        cursor = QCursor.pos()
+        if emote is None and self._last_emote is not None and cursor == self._last_cursor:
+            emote = self._last_emote
         if emote is not None:
             self.show_emote(emote)
+            self._last_emote = emote
+            self._last_cursor = cursor
         self.close_wheel()
 
     def close_wheel(self):
@@ -201,4 +231,7 @@ class Overlay(QWidget):
             x, y = margin, margin
         elif pos == "top-right":
             x, y = w - size - margin, margin
+        # 随机小偏移，避免连续发送的表情完全重叠
+        x += random.randint(-20, 20)
+        y += random.randint(-20, 20)
         return QRect(x, y, size, size)

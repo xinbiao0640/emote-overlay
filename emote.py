@@ -1,4 +1,4 @@
-"""表情弹出控件：支持静态 PNG 与动态 GIF，带弹出缩放与淡入淡出动画。"""
+"""表情弹出：每个表情是一个独立的小窗口，支持多个同时显示，带缩放与淡入淡出。"""
 import os
 
 from PySide6.QtCore import Qt, QRect, QTimer, QEasingCurve, QPropertyAnimation
@@ -11,15 +11,19 @@ def is_animated(path):
     return ext == ".gif"
 
 
-class EmoteDisplay(QWidget):
-    def __init__(self, parent=None):
-        super().__init__(parent)
-        self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+class _EmoteItem(QWidget):
+    """单个表情弹窗，动画结束后自毁。"""
 
+    def __init__(self, emote, display_cfg, on_finished):
+        super().__init__()
+        self._on_finished = on_finished
         self._movie = None
         self._pixmap = None
-        self._fade_enabled = True
+        self._fade_enabled = bool(display_cfg.get("fade", True))
+        self._duration = float(display_cfg.get("duration", 2.5))
+
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         self._effect = QGraphicsOpacityEffect(self)
         self._effect.setOpacity(1.0)
@@ -29,20 +33,16 @@ class EmoteDisplay(QWidget):
         self._fade_in_anim = None
         self._fade_out_anim = None
         self._timer = None
-        self.hide()
 
-    def show_emote(self, emote, final_rect: QRect, display_cfg: dict):
-        self._clear_animations()
         path = emote.get("file", "")
-
         if is_animated(path):
             self._movie = QMovie(path)
             self._movie.frameChanged.connect(self.update)
             self._movie.start()
         else:
             self._pixmap = QPixmap(path)
-        self._fade_enabled = bool(display_cfg.get("fade", True))
 
+    def start(self, final_rect):
         # 从 0.7 倍大小弹到目标大小（OutBack 回弹）
         f = 0.7
         small = QRect(
@@ -62,7 +62,6 @@ class EmoteDisplay(QWidget):
         self._pop_anim.setEasingCurve(QEasingCurve.OutBack)
         self._pop_anim.start()
 
-        # 淡入
         if self._fade_enabled:
             self._effect.setOpacity(0.0)
             self._fade_in_anim = QPropertyAnimation(self._effect, b"opacity")
@@ -73,33 +72,33 @@ class EmoteDisplay(QWidget):
         else:
             self._effect.setOpacity(1.0)
 
-        # 定时淡出
-        duration = float(display_cfg.get("duration", 2.5))
         self._timer = QTimer(self)
         self._timer.setSingleShot(True)
         self._timer.timeout.connect(self._fade_out)
-        self._timer.start(int(duration * 1000))
+        self._timer.start(int(self._duration * 1000))
 
     def _fade_out(self):
         if not self.isVisible():
             return
         if not self._fade_enabled:
-            self._hide_and_clear()
+            self._finish()
             return
         self._fade_out_anim = QPropertyAnimation(self._effect, b"opacity")
         self._fade_out_anim.setStartValue(self._effect.opacity())
         self._fade_out_anim.setEndValue(0.0)
         self._fade_out_anim.setDuration(350)
-        self._fade_out_anim.finished.connect(self._hide_and_clear)
+        self._fade_out_anim.finished.connect(self._finish)
         self._fade_out_anim.start()
 
-    def _hide_and_clear(self):
+    def _finish(self):
         self.hide()
         self._clear_animations()
         if self._movie is not None:
             self._movie.stop()
             self._movie = None
         self._pixmap = None
+        if self._on_finished is not None:
+            self._on_finished(self)
 
     def _clear_animations(self):
         for anim in (self._pop_anim, self._fade_in_anim, self._fade_out_anim):
@@ -120,3 +119,27 @@ class EmoteDisplay(QWidget):
         elif self._pixmap is not None and not self._pixmap.isNull():
             p.drawPixmap(self.rect(), self._pixmap)
         p.end()
+
+
+class EmoteDisplay(QWidget):
+    """表情弹窗管理器：每个表情一个子窗口，可同时显示多个。"""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setAttribute(Qt.WA_TranslucentBackground)
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
+        self._items = []
+
+    def show_emote(self, emote, final_rect, display_cfg):
+        item = _EmoteItem(emote, display_cfg, self._on_item_finished)
+        item.setParent(self)
+        self._items.append(item)
+        item.start(final_rect)
+
+    def _on_item_finished(self, item):
+        if item in self._items:
+            self._items.remove(item)
+        item.deleteLater()
+
+    def active_count(self):
+        return len(self._items)

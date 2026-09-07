@@ -44,13 +44,14 @@ def main():
     disp = EmoteDisplay(overlay)
     print("Overlay / EmoteDisplay 构造 OK")
 
-    # 5. 表情弹出
+    # 5. 表情弹出（支持多个同时显示）
     groups = [{"name": "测试", "emotes": [{"name": f"e{i}", "file": sample} for i in range(6)]}]
     overlay.set_groups(groups)
     overlay.show_emote(groups[0]["emotes"][0])
+    overlay.show_emote(groups[0]["emotes"][1])
     app.processEvents()
-    assert overlay._emote_display.isVisible(), "表情未显示"
-    print("表情弹出 OK")
+    assert overlay._emote_display.active_count() == 2, "表情未显示"
+    print("表情弹出 OK（多表情同时显示）")
 
     # 6. 松开选中并关闭滚轮
     overlay.open_wheel()
