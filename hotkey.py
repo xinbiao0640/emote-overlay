@@ -9,6 +9,8 @@
 import keyboard
 from PySide6.QtCore import QObject, QThread, Signal
 
+from winutil import is_typing
+
 
 class KeyCaptureThread(QThread):
     """在后台线程阻塞读取一个按键，用于设置面板里绑定快捷键。"""
@@ -66,6 +68,8 @@ class HotkeyManager(QObject):
         self._dismiss_handler = None
 
     def _emit_open_pressed(self, event=None):
+        if is_typing():
+            return
         self.openPressed.emit()
 
     def _emit_open_released(self, event=None):

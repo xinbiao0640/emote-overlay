@@ -1,9 +1,10 @@
-"""设置面板：绑定快捷键、上传/管理表情、调整显示参数。"""
+"""设置面板：绑定快捷键、按「滚轮分组」管理表情、调整显示参数。"""
 import copy
+import math
 import os
 
-from PySide6.QtCore import Qt, QSize
-from PySide6.QtGui import QPixmap, QMovie
+from PySide6.QtCore import Qt, QSize, QRectF, QPointF, Signal
+from PySide6.QtGui import QPixmap, QMovie, QPainter, QColor, QPen, QBrush
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -11,8 +12,6 @@ from PySide6.QtWidgets import (
     QFormLayout,
     QGroupBox,
     QPushButton,
-    QListWidget,
-    QListWidgetItem,
     QLabel,
     QComboBox,
     QSpinBox,
@@ -22,11 +21,110 @@ from PySide6.QtWidgets import (
     QFileDialog,
     QInputDialog,
     QMessageBox,
+    QWidget,
 )
 
 import config as config_mod
-from emote_manager import import_emote, ALLOWED_EXTS
+from emote_manager import import_emote
 from hotkey import KeyCaptureThread
+from wheel import angle_index
+
+
+def _thumb(emote):
+    """GIF 取第一帧做缩略图，PNG/WebP 直接加载；文件缺失返回 None。"""
+    path = emote.get("file", "")
+    if not path or not os.path.exists(path):
+        return None
+    ext = os.path.splitext(path)[1].lower()
+    if ext == ".gif":
+        movie = QMovie(path)
+        if movie.isValid():
+            movie.jumpToFrame(0)
+            pm = movie.currentPixmap()
+            movie.stop()
+            return pm
+    return QPixmap(path)
+
+
+class WheelPreview(QWidget):
+    """把当前分组的表情按滚轮位置画成一个可点击的圆形，直观反映最终布局。"""
+
+    selectionChanged = Signal(int)
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self._emotes = []
+        self._selected = -1
+        self._pixmaps = []
+        self._radius = 96
+        self.setMinimumSize(240, 240)
+
+    def set_emotes(self, emotes):
+        self._emotes = list(emotes)
+        self._pixmaps = [_thumb(e) for e in self._emotes]
+        self._selected = -1
+        self.update()
+
+    def set_selected(self, index):
+        self._selected = index
+        self.update()
+
+    def selected_index(self):
+        return self._selected
+
+    def mousePressEvent(self, event):
+        if not self._emotes:
+            return
+        pos = event.position()
+        dx = pos.x() - self.width() / 2
+        dy = pos.y() - self.height() / 2
+        idx = angle_index(dx, dy, len(self._emotes))
+        if idx >= 0:
+            self.set_selected(idx)
+            self.selectionChanged.emit(idx)
+
+    def paintEvent(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        n = len(self._emotes)
+        if n == 0:
+            p.setPen(QColor(255, 255, 255, 140))
+            p.drawText(self.rect(), Qt.AlignCenter, "该分组为空，点击下方「添加表情」")
+            p.end()
+            return
+
+        center = QPointF(self.width() / 2, self.height() / 2)
+        outer = QRectF(center.x() - self._radius, center.y() - self._radius,
+                       self._radius * 2, self._radius * 2)
+        angle_step = 360.0 / n
+
+        for i in range(n):
+            start_compass = i * angle_step
+            qt_start = 90.0 - start_compass
+            span = -angle_step
+            if i == self._selected:
+                p.setBrush(QBrush(QColor(90, 170, 255, 160)))
+                p.setPen(QPen(QColor(255, 255, 255, 220), 3))
+            else:
+                p.setBrush(QBrush(QColor(40, 40, 40, 150)))
+                p.setPen(QPen(QColor(255, 255, 255, 90), 2))
+            p.drawPie(outer, int(qt_start * 16), int(span * 16))
+
+            mid = math.radians(start_compass + angle_step / 2)
+            dist = self._radius * 0.62
+            cx = center.x() + dist * math.sin(mid)
+            cy = center.y() - dist * math.cos(mid)
+            pm = self._pixmaps[i]
+            if pm is not None and not pm.isNull():
+                box = int(self._radius * 0.46)
+                scaled = pm.scaled(box, box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                p.drawPixmap(int(cx - scaled.width() / 2),
+                             int(cy - scaled.height() / 2), scaled)
+
+        p.setBrush(QBrush(QColor(15, 15, 15, 190)))
+        p.setPen(QPen(QColor(255, 255, 255, 70), 2))
+        p.drawEllipse(center, 16, 16)
+        p.end()
 
 
 class SettingsDialog(QDialog):
@@ -34,9 +132,10 @@ class SettingsDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("表情 Overlay 设置")
         self._config = copy.deepcopy(config)
+        self._config.setdefault("groups", [])
         self._capture_target = None
         self._capture_thread = None
-        self._preview_movie = None
+        self._selected_index = -1
 
         self._build_ui()
         self._load_from_config()
@@ -58,34 +157,44 @@ class SettingsDialog(QDialog):
         hotkey_form.addRow("关闭 / 取消", self._dismiss_key_btn)
         root.addWidget(hotkey_box)
 
-        # 表情管理
+        # 表情管理（分组 + 圆形预览）
         emote_box = QGroupBox("表情（PNG / GIF / WebP）")
         emote_layout = QVBoxLayout(emote_box)
-        self._emote_list = QListWidget()
-        self._emote_list.setIconSize(QSize(32, 32))
-        self._emote_list.currentItemChanged.connect(self._on_select_emote)
-        emote_layout.addWidget(self._emote_list)
+
+        group_row = QHBoxLayout()
+        group_row.addWidget(QLabel("分组"))
+        self._group_combo = QComboBox()
+        self._group_combo.currentIndexChanged.connect(self._on_group_changed)
+        group_row.addWidget(self._group_combo, stretch=1)
+        self._add_group_btn = QPushButton("添加分组")
+        self._add_group_btn.clicked.connect(self._add_group)
+        self._remove_group_btn = QPushButton("删除分组")
+        self._remove_group_btn.clicked.connect(self._remove_group)
+        self._rename_group_btn = QPushButton("重命名分组")
+        self._rename_group_btn.clicked.connect(self._rename_group)
+        for b in (self._add_group_btn, self._remove_group_btn, self._rename_group_btn):
+            group_row.addWidget(b)
+        emote_layout.addLayout(group_row)
+
+        self._preview = WheelPreview()
+        emote_layout.addWidget(self._preview, alignment=Qt.AlignCenter)
 
         btn_row = QHBoxLayout()
         self._add_btn = QPushButton("添加表情")
         self._add_btn.clicked.connect(self._add_emotes)
         self._remove_btn = QPushButton("删除")
         self._remove_btn.clicked.connect(self._remove_emote)
+        self._rename_btn = QPushButton("重命名")
+        self._rename_btn.clicked.connect(self._rename_emote)
         self._up_btn = QPushButton("上移")
         self._up_btn.clicked.connect(lambda: self._move_emote(-1))
         self._down_btn = QPushButton("下移")
         self._down_btn.clicked.connect(lambda: self._move_emote(1))
-        self._rename_btn = QPushButton("重命名")
-        self._rename_btn.clicked.connect(self._rename_emote)
-        for b in (self._add_btn, self._remove_btn, self._up_btn, self._down_btn, self._rename_btn):
+        for b in (self._add_btn, self._remove_btn, self._rename_btn, self._up_btn, self._down_btn):
             btn_row.addWidget(b)
         emote_layout.addLayout(btn_row)
 
-        self._preview = QLabel("（预览）")
-        self._preview.setFixedSize(96, 96)
-        self._preview.setAlignment(Qt.AlignCenter)
-        self._preview.setStyleSheet("border: 1px solid #888;")
-        emote_layout.addWidget(self._preview, alignment=Qt.AlignCenter)
+        self._preview.selectionChanged.connect(self._on_preview_select)
         root.addWidget(emote_box)
 
         # 显示参数
@@ -119,14 +228,11 @@ class SettingsDialog(QDialog):
         self._open_key_btn.setText(self._config.get("hotkey_open", ""))
         self._dismiss_key_btn.setText(self._config.get("hotkey_dismiss", ""))
 
-        self._emote_list.clear()
-        for emote in self._config.get("emotes", []):
-            item = QListWidgetItem(emote.get("name", ""))
-            item.setData(Qt.UserRole, emote)
-            icon = self._make_icon(emote)
-            if icon is not None:
-                item.setIcon(icon)
-            self._emote_list.addItem(item)
+        self._group_combo.blockSignals(True)
+        self._group_combo.clear()
+        for group in self._config.get("groups", []):
+            self._group_combo.addItem(group.get("name", "未命名"))
+        self._group_combo.blockSignals(False)
 
         d = self._config.get("display", {})
         idx = self._pos_combo.findData(d.get("position", "bottom-center"))
@@ -136,18 +242,120 @@ class SettingsDialog(QDialog):
         self._duration_spin.setValue(float(d.get("duration", 2.5)))
         self._fade_check.setChecked(bool(d.get("fade", True)))
 
-    @staticmethod
-    def _make_icon(emote):
-        path = emote.get("file", "")
-        if not path or not os.path.exists(path):
-            return None
-        ext = os.path.splitext(path)[1].lower()
-        if ext == ".gif":
-            movie = QMovie(path)
-            if movie.isValid():
-                movie.jumpToFrame(0)
-                return movie.currentPixmap().scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-        return QPixmap(path).scaled(32, 32, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+        self._selected_index = -1
+        self._reload_preview()
+
+    # ---- 分组 ----
+    def _current_group(self):
+        idx = self._group_combo.currentIndex()
+        groups = self._config.get("groups", [])
+        if 0 <= idx < len(groups):
+            return groups[idx]
+        return None
+
+    def _reload_preview(self):
+        group = self._current_group()
+        emotes = group.get("emotes", []) if group else []
+        self._preview.set_emotes(emotes)
+        self._preview.set_selected(self._selected_index)
+        self._update_emote_buttons()
+
+    def _on_group_changed(self, _index):
+        self._selected_index = -1
+        self._reload_preview()
+
+    def _add_group(self):
+        groups = self._config.setdefault("groups", [])
+        groups.append({"name": f"分组 {len(groups) + 1}", "emotes": []})
+        self._group_combo.blockSignals(True)
+        self._group_combo.addItem(groups[-1]["name"])
+        self._group_combo.setCurrentIndex(self._group_combo.count() - 1)
+        self._group_combo.blockSignals(False)
+        self._selected_index = -1
+        self._reload_preview()
+
+    def _remove_group(self):
+        idx = self._group_combo.currentIndex()
+        if idx < 0:
+            return
+        if len(self._config.get("groups", [])) <= 1:
+            QMessageBox.information(self, "表情 Overlay", "至少保留一个分组。")
+            return
+        self._config["groups"].pop(idx)
+        self._group_combo.blockSignals(True)
+        self._group_combo.removeItem(idx)
+        self._group_combo.blockSignals(False)
+        self._selected_index = -1
+        self._reload_preview()
+
+    def _rename_group(self):
+        idx = self._group_combo.currentIndex()
+        if idx < 0:
+            return
+        name, ok = QInputDialog.getText(self, "重命名分组", "分组名称：",
+                                        text=self._group_combo.itemText(idx))
+        if ok and name.strip():
+            self._config["groups"][idx]["name"] = name.strip()
+            self._group_combo.setItemText(idx, name.strip())
+
+    # ---- 表情 ----
+    def _add_emotes(self):
+        group = self._current_group()
+        if group is None:
+            return
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "选择表情图片", "", "表情图片 (*.png *.gif *.webp)"
+        )
+        if not paths:
+            return
+        for p in paths:
+            group.setdefault("emotes", []).append(import_emote(p))
+        self._reload_preview()
+
+    def _remove_emote(self):
+        group = self._current_group()
+        if group is None or self._selected_index < 0:
+            return
+        emotes = group.get("emotes", [])
+        if 0 <= self._selected_index < len(emotes):
+            emotes.pop(self._selected_index)
+        self._selected_index = -1
+        self._reload_preview()
+
+    def _rename_emote(self):
+        group = self._current_group()
+        if group is None or self._selected_index < 0:
+            return
+        emotes = group.get("emotes", [])
+        if not (0 <= self._selected_index < len(emotes)):
+            return
+        name, ok = QInputDialog.getText(self, "重命名", "表情名称：",
+                                        text=emotes[self._selected_index].get("name", ""))
+        if ok and name.strip():
+            emotes[self._selected_index]["name"] = name.strip()
+
+    def _move_emote(self, delta):
+        group = self._current_group()
+        if group is None or self._selected_index < 0:
+            return
+        emotes = group.get("emotes", [])
+        if len(emotes) < 2 or not (0 <= self._selected_index < len(emotes)):
+            return
+        i = self._selected_index
+        j = (i + delta) % len(emotes)
+        emotes.insert(j, emotes.pop(i))
+        self._selected_index = j
+        self._reload_preview()
+
+    def _on_preview_select(self, index):
+        self._selected_index = index
+        self._update_emote_buttons()
+
+    def _update_emote_buttons(self):
+        has = self._current_group() is not None
+        selected = has and self._selected_index >= 0
+        for b in (self._remove_btn, self._rename_btn, self._up_btn, self._down_btn):
+            b.setEnabled(selected)
 
     # ---- 快捷键绑定 ----
     def _start_capture(self, target):
@@ -170,84 +378,8 @@ class SettingsDialog(QDialog):
         self._capture_target = None
         self._capture_thread = None
 
-    # ---- 表情管理 ----
-    def _add_emotes(self):
-        paths, _ = QFileDialog.getOpenFileNames(
-            self, "选择表情图片", "", "表情图片 (*.png *.gif *.webp)"
-        )
-        for p in paths:
-            emote = import_emote(p)
-            self._config.setdefault("emotes", []).append(emote)
-            item = QListWidgetItem(emote.get("name", ""))
-            item.setData(Qt.UserRole, emote)
-            icon = self._make_icon(emote)
-            if icon is not None:
-                item.setIcon(icon)
-            self._emote_list.addItem(item)
-
-    def _remove_emote(self):
-        row = self._emote_list.currentRow()
-        if row < 0:
-            return
-        self._emote_list.takeItem(row)
-        self._config["emotes"].pop(row)
-        self._clear_preview()
-
-    def _move_emote(self, delta):
-        row = self._emote_list.currentRow()
-        if row < 0:
-            return
-        new_row = row + delta
-        if new_row < 0 or new_row >= self._emote_list.count():
-            return
-        item = self._emote_list.takeItem(row)
-        self._emote_list.insertItem(new_row, item)
-        self._emote_list.setCurrentRow(new_row)
-        emotes = self._config["emotes"]
-        emotes.insert(new_row, emotes.pop(row))
-
-    def _rename_emote(self):
-        row = self._emote_list.currentRow()
-        if row < 0:
-            return
-        item = self._emote_list.item(row)
-        name, ok = QInputDialog.getText(self, "重命名", "表情名称：", text=item.text())
-        if ok and name.strip():
-            item.setText(name.strip())
-            self._config["emotes"][row]["name"] = name.strip()
-
-    def _on_select_emote(self, current, _previous):
-        self._update_preview(current)
-
-    def _update_preview(self, item):
-        self._clear_preview()
-        if item is None:
-            self._preview.setText("（预览）")
-            return
-        emote = item.data(Qt.UserRole)
-        path = emote.get("file", "")
-        if not path or not os.path.exists(path):
-            self._preview.setText("（文件缺失）")
-            return
-        if os.path.splitext(path)[1].lower() == ".gif":
-            self._preview_movie = QMovie(path)
-            self._preview_movie.setScaledSize(QSize(96, 96))
-            self._preview.setMovie(self._preview_movie)
-            self._preview_movie.start()
-        else:
-            pm = QPixmap(path).scaled(96, 96, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            self._preview.setPixmap(pm)
-
-    def _clear_preview(self):
-        if self._preview_movie is not None:
-            self._preview_movie.stop()
-            self._preview_movie = None
-        self._preview.clear()
-        self._preview.setPixmap(QPixmap())
-
     # ---- 确认 ----
     def _on_accept(self):
-        self._clear_preview()
         if self._capture_thread is not None and self._capture_thread.isRunning():
             self._capture_thread.requestInterruption()
         self.accept()

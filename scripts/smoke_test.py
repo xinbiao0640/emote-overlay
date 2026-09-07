@@ -27,14 +27,14 @@ def main():
     assert not pm.isNull(), "示例 PNG 无法加载"
     print("PNG 加载 OK:", pm.width(), "x", pm.height())
 
-    # 3. 滚轮角度判定（只看方向角度，不限制距离）
+    # 3. 滚轮角度判定（只看方向角度，不限制距离，无中心死区）
     n = 6
-    inner = cfg["wheel"]["inner_radius"]
-    assert angle_index(0, -100, n, inner) == 0      # 正上方
-    assert angle_index(100, 0, n, inner) == 1       # 正右方
-    assert angle_index(0, 100, n, inner) == 3       # 正下方
-    assert angle_index(0, 0, n, inner) == -1        # 死区
-    assert angle_index(0, -9999, n, inner) == 0     # 很远仍按方向选中
+    assert angle_index(0, -100, n) == 0      # 正上方
+    assert angle_index(100, 0, n) == 1       # 正右方
+    assert angle_index(0, 100, n) == 3       # 正下方
+    assert angle_index(0, 0, n) == -1        # 恰好中心点
+    assert angle_index(0, -9999, n) == 0     # 很远仍按方向选中
+    assert angle_index(1, -1, n) == 0        # 极靠近中心也选中（无死区）
     print("滚轮角度判定 OK")
 
     # 4. overlay / emote 模块可导入并构造
@@ -45,9 +45,9 @@ def main():
     print("Overlay / EmoteDisplay 构造 OK")
 
     # 5. 表情弹出
-    emotes = [{"name": f"e{i}", "file": sample} for i in range(6)]
-    overlay.set_emotes(emotes)
-    overlay.show_emote(emotes[0])
+    groups = [{"name": "测试", "emotes": [{"name": f"e{i}", "file": sample} for i in range(6)]}]
+    overlay.set_groups(groups)
+    overlay.show_emote(groups[0]["emotes"][0])
     app.processEvents()
     assert overlay._emote_display.isVisible(), "表情未显示"
     print("表情弹出 OK")
@@ -57,11 +57,24 @@ def main():
     app.processEvents()
     assert overlay._wheel_visible(), "滚轮未打开"
     overlay._wheel.set_hover_index(0)
-    assert overlay._wheel.current_emote() is emotes[0]
+    assert overlay._wheel.current_emote() is groups[0]["emotes"][0]
     overlay.release_wheel()
     app.processEvents()
     assert not overlay._wheel_visible(), "松开后滚轮未关闭"
     print("松开选中 OK")
+
+    # 7. 分组切换（滚轮事件切换表情组）
+    groups.append({"name": "第二组", "emotes": [{"name": f"g{i}", "file": sample} for i in range(3)]})
+    overlay.set_groups(groups)
+    overlay.open_wheel()
+    app.processEvents()
+    assert overlay._group_index == 0
+    assert overlay._wheel.current_emote() is None  # 未高亮
+    overlay._switch_group(1)
+    assert overlay._group_index == 1
+    assert len(overlay._wheel.emotes) == 3
+    overlay.release_wheel()
+    print("分组切换 OK")
 
     print("SMOKE_OK")
 

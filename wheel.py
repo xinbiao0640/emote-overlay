@@ -20,13 +20,13 @@ def _thumbnail(emote):
     return QPixmap(path)
 
 
-def angle_index(dx, dy, n, inner_radius):
+def angle_index(dx, dy, n):
     """根据鼠标相对滚轮中心的方向向量，计算高亮的表情索引。
 
-    只看方向角度、不限制距离：只要离开中心死区（inner_radius），
-    移动多远都能选中对应方向的表情。死区内返回 -1。
+    只看方向角度、不限制距离，无中心死区：只要不是恰好在中心点，
+    移动多远都能选中对应方向的表情。中心点返回 -1（无选中）。
     """
-    if n == 0 or math.hypot(dx, dy) <= inner_radius:
+    if n == 0 or (dx == 0 and dy == 0):
         return -1
     theta = math.degrees(math.atan2(dx, -dy))
     if theta < 0:
@@ -35,21 +35,34 @@ def angle_index(dx, dy, n, inner_radius):
 
 
 class EmoteWheel(QWidget):
-    def __init__(self, parent, emotes, wheel_cfg):
+    def __init__(self, parent, emotes, wheel_cfg, group_label=""):
         super().__init__(parent)
-        self.emotes = list(emotes)
         self.radius = int(wheel_cfg.get("radius", 130))
-        self.inner_radius = int(wheel_cfg.get("inner_radius", 25))
+        self.group_label = group_label
         self._hover_index = -1
 
         self.setAttribute(Qt.WA_TranslucentBackground)
+        # 滚轮本身不接收鼠标事件，交给 overlay 统一处理（滚轮切换分组等）
+        self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
         padding = 20
         size = (self.radius + padding) * 2
         self.resize(size, size)
         self._center = QPointF(self.width() / 2, self.height() / 2)
 
+        self.emotes = []
+        self._pixmaps = []
+        self.set_emotes(emotes)
+
+    def set_emotes(self, emotes):
+        self.emotes = list(emotes)
         self._pixmaps = [_thumbnail(e) for e in self.emotes]
+        self._hover_index = -1
+        self.update()
+
+    def set_group_label(self, label):
+        self.group_label = label or ""
+        self.update()
 
     def set_hover_index(self, idx):
         if idx != self._hover_index:
@@ -94,12 +107,12 @@ class EmoteWheel(QWidget):
 
             # 在扇区中间放缩略图
             mid = math.radians(start_compass + angle_step / 2)
-            dist = (self.radius + self.inner_radius) / 2
+            dist = self.radius * 0.6
             cx = self._center.x() + dist * math.sin(mid)
             cy = self._center.y() - dist * math.cos(mid)
             pm = self._pixmaps[i]
             if pm is not None and not pm.isNull():
-                box = int((self.radius - self.inner_radius) * 0.72)
+                box = int(self.radius * 0.44)
                 scaled = pm.scaled(box, box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 p.drawPixmap(
                     int(cx - scaled.width() / 2),
@@ -107,8 +120,19 @@ class EmoteWheel(QWidget):
                     scaled,
                 )
 
-        # 中心死区
+        # 中心锚点 + 分组标签（纯视觉，不作为死区）
+        center_r = 16
         p.setBrush(QBrush(QColor(15, 15, 15, 190)))
         p.setPen(QPen(QColor(255, 255, 255, 70), 2))
-        p.drawEllipse(self._center, self.inner_radius, self.inner_radius)
+        p.drawEllipse(self._center, center_r, center_r)
+        if self.group_label:
+            p.setPen(QColor(255, 255, 255, 220))
+            font = p.font()
+            font.setPointSize(9)
+            p.setFont(font)
+            p.drawText(
+                QRectF(self._center.x() - 40, self._center.y() - 14, 80, 28),
+                Qt.AlignCenter,
+                self.group_label,
+            )
         p.end()

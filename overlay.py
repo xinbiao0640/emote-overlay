@@ -38,7 +38,8 @@ def _apply_click_through(hwnd: int, enabled: bool):
 class Overlay(QWidget):
     def __init__(self, config):
         super().__init__()
-        self._emotes = list(config.get("emotes", []))
+        self._groups = list(config.get("groups", []))
+        self._group_index = 0
         self._display_cfg = dict(config.get("display", {}))
         self._wheel_cfg = dict(config.get("wheel", {}))
 
@@ -65,8 +66,10 @@ class Overlay(QWidget):
         _apply_click_through(int(self.winId()), True)
 
     # ---- 配置 ----
-    def set_emotes(self, emotes):
-        self._emotes = list(emotes)
+    def set_groups(self, groups):
+        self._groups = list(groups)
+        if self._group_index >= len(self._groups):
+            self._group_index = 0
 
     def set_display_cfg(self, cfg):
         self._display_cfg = dict(cfg)
@@ -74,15 +77,43 @@ class Overlay(QWidget):
     def set_wheel_cfg(self, cfg):
         self._wheel_cfg = dict(cfg)
 
+    # ---- 分组 ----
+    def _current_emotes(self):
+        if 0 <= self._group_index < len(self._groups):
+            group = self._groups[self._group_index]
+            return group.get("emotes", []) if isinstance(group, dict) else group
+        return []
+
+    def _current_label(self):
+        if 0 <= self._group_index < len(self._groups):
+            group = self._groups[self._group_index]
+            if isinstance(group, dict):
+                return group.get("name", "")
+        return ""
+
+    def _switch_group(self, delta):
+        total = len(self._groups)
+        if total == 0:
+            return
+        self._group_index = (self._group_index + delta) % total
+        if self._wheel_visible():
+            self._wheel.set_emotes(self._current_emotes())
+            self._wheel.set_group_label(self._current_label())
+            self._wheel.set_hover_index(-1)
+
     # ---- 滚轮 ----
     def open_wheel(self):
-        if not self._emotes:
+        if not self._groups:
             return
         if self._wheel_visible():
             return
+        self._group_index = 0
+        emotes = self._current_emotes()
+        if not emotes:
+            return
         _apply_click_through(int(self.winId()), False)
         self._wheel_center = QCursor.pos()
-        self._wheel = EmoteWheel(self, self._emotes, self._wheel_cfg)
+        self._wheel = EmoteWheel(self, emotes, self._wheel_cfg, self._current_label())
         cursor = QCursor.pos()
         local = self.mapFromGlobal(cursor)
         self._wheel.move(
@@ -96,17 +127,29 @@ class Overlay(QWidget):
         self._hover_timer.timeout.connect(self._update_hover)
         self._hover_timer.start(16)
 
+    def wheelEvent(self, event):
+        # 滚轮打开时，鼠标滚轮用于切换表情分组
+        if not self._wheel_visible():
+            event.ignore()
+            return
+        delta = event.angleDelta().y()
+        if delta > 0:
+            self._switch_group(1)
+        elif delta < 0:
+            self._switch_group(-1)
+        event.accept()
+
     def _update_hover(self):
         if not self._wheel_visible():
             return
-        n = len(self._emotes)
+        emotes = self._current_emotes()
+        n = len(emotes)
         if n == 0:
             return
         cursor = QCursor.pos()
         dx = cursor.x() - self._wheel_center.x()
         dy = cursor.y() - self._wheel_center.y()
-        inner = int(self._wheel_cfg.get("inner_radius", 25))
-        self._wheel.set_hover_index(angle_index(dx, dy, n, inner))
+        self._wheel.set_hover_index(angle_index(dx, dy, n))
 
     def release_wheel(self):
         """松开呼出键：选中当前高亮的表情并关闭滚轮。"""

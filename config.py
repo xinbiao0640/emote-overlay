@@ -8,7 +8,7 @@ CONFIG_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "config.j
 DEFAULT_CONFIG = {
     "hotkey_open": "v",
     "hotkey_dismiss": "esc",
-    "emotes": [],
+    "groups": [],
     "display": {
         "position": "cursor",
         "size": 120,
@@ -17,7 +17,6 @@ DEFAULT_CONFIG = {
     },
     "wheel": {
         "radius": 130,
-        "inner_radius": 25,
     },
 }
 
@@ -58,11 +57,28 @@ def _merge(defaults, data):
     return result
 
 
+def _migrate(data):
+    """把旧版配置升级到当前结构。
+
+    旧版用平铺的 ``emotes`` 列表；现改为 ``groups``（每个分组含 name + emotes）。
+    滚轮中心死区 ``inner_radius`` 已移除。
+    """
+    if not isinstance(data, dict):
+        return data
+    data = copy.deepcopy(data)
+    if "groups" not in data and "emotes" in data:
+        data["groups"] = [{"name": "默认", "emotes": data.pop("emotes")}]
+    if isinstance(data.get("wheel"), dict):
+        data["wheel"].pop("inner_radius", None)
+    return data
+
+
 def load_config():
     if os.path.exists(CONFIG_PATH):
         try:
             with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-                return _merge(DEFAULT_CONFIG, json.load(f))
+                data = _migrate(json.load(f))
+            return _merge(DEFAULT_CONFIG, data)
         except (json.JSONDecodeError, OSError):
             pass
     return copy.deepcopy(DEFAULT_CONFIG)

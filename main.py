@@ -50,7 +50,7 @@ def main():
 
     def apply_config(new_cfg):
         config_mod.save_config(new_cfg)
-        overlay.set_emotes(new_cfg.get("emotes", []))
+        overlay.set_groups(new_cfg.get("groups", []))
         overlay.set_display_cfg(new_cfg.get("display", {}))
         overlay.set_wheel_cfg(new_cfg.get("wheel", {}))
         hotkeys.set_hotkeys(new_cfg.get("hotkey_open"), new_cfg.get("hotkey_dismiss"))
