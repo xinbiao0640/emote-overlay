@@ -43,7 +43,8 @@ def main():
     overlay = Overlay(cfg)
 
     hotkeys = HotkeyManager()
-    hotkeys.openTriggered.connect(overlay.toggle_wheel)
+    hotkeys.openPressed.connect(overlay.open_wheel)
+    hotkeys.openReleased.connect(overlay.release_wheel)
     hotkeys.dismissTriggered.connect(overlay.close_wheel)
     hotkeys.set_hotkeys(cfg.get("hotkey_open"), cfg.get("hotkey_dismiss"))
 

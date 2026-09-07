@@ -2,7 +2,7 @@
 import os
 
 from PySide6.QtCore import Qt, QRect, QTimer, QEasingCurve, QPropertyAnimation
-from PySide6.QtGui import QPainter, QPixmap, QMovie, QColor
+from PySide6.QtGui import QPainter, QPixmap, QMovie
 from PySide6.QtWidgets import QWidget, QGraphicsOpacityEffect
 
 
@@ -19,14 +19,15 @@ class EmoteDisplay(QWidget):
 
         self._movie = None
         self._pixmap = None
+        self._fade_enabled = True
 
         self._effect = QGraphicsOpacityEffect(self)
         self._effect.setOpacity(1.0)
         self.setGraphicsEffect(self._effect)
 
-        self._fade_in = None
-        self._fade_out = None
-        self._pop = None
+        self._pop_anim = None
+        self._fade_in_anim = None
+        self._fade_out_anim = None
         self._timer = None
         self.hide()
 
@@ -54,21 +55,21 @@ class EmoteDisplay(QWidget):
         self.show()
         self.raise_()
 
-        self._pop = QPropertyAnimation(self, b"geometry")
-        self._pop.setStartValue(small)
-        self._pop.setEndValue(final_rect)
-        self._pop.setDuration(220)
-        self._pop.setEasingCurve(QEasingCurve.OutBack)
-        self._pop.start()
+        self._pop_anim = QPropertyAnimation(self, b"geometry")
+        self._pop_anim.setStartValue(small)
+        self._pop_anim.setEndValue(final_rect)
+        self._pop_anim.setDuration(220)
+        self._pop_anim.setEasingCurve(QEasingCurve.OutBack)
+        self._pop_anim.start()
 
         # 淡入
         if self._fade_enabled:
             self._effect.setOpacity(0.0)
-            self._fade_in = QPropertyAnimation(self._effect, b"opacity")
-            self._fade_in.setStartValue(0.0)
-            self._fade_in.setEndValue(1.0)
-            self._fade_in.setDuration(120)
-            self._fade_in.start()
+            self._fade_in_anim = QPropertyAnimation(self._effect, b"opacity")
+            self._fade_in_anim.setStartValue(0.0)
+            self._fade_in_anim.setEndValue(1.0)
+            self._fade_in_anim.setDuration(120)
+            self._fade_in_anim.start()
         else:
             self._effect.setOpacity(1.0)
 
@@ -82,15 +83,15 @@ class EmoteDisplay(QWidget):
     def _fade_out(self):
         if not self.isVisible():
             return
-        if not getattr(self, "_fade_enabled", True):
+        if not self._fade_enabled:
             self._hide_and_clear()
             return
-        self._fade_out = QPropertyAnimation(self._effect, b"opacity")
-        self._fade_out.setStartValue(self._effect.opacity())
-        self._fade_out.setEndValue(0.0)
-        self._fade_out.setDuration(350)
-        self._fade_out.finished.connect(self._hide_and_clear)
-        self._fade_out.start()
+        self._fade_out_anim = QPropertyAnimation(self._effect, b"opacity")
+        self._fade_out_anim.setStartValue(self._effect.opacity())
+        self._fade_out_anim.setEndValue(0.0)
+        self._fade_out_anim.setDuration(350)
+        self._fade_out_anim.finished.connect(self._hide_and_clear)
+        self._fade_out_anim.start()
 
     def _hide_and_clear(self):
         self.hide()
@@ -101,10 +102,10 @@ class EmoteDisplay(QWidget):
         self._pixmap = None
 
     def _clear_animations(self):
-        for anim in (self._pop, self._fade_in, self._fade_out):
+        for anim in (self._pop_anim, self._fade_in_anim, self._fade_out_anim):
             if anim is not None:
                 anim.stop()
-        self._pop = self._fade_in = self._fade_out = None
+        self._pop_anim = self._fade_in_anim = self._fade_out_anim = None
         if self._timer is not None:
             self._timer.stop()
             self._timer = None

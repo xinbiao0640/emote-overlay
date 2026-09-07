@@ -2,12 +2,30 @@
   "hotkey_open": "v",
   "hotkey_dismiss": "esc",
   "emotes": [
-    {"name": "赞", "file": "emotes/thumbs_up.png"},
-    {"name": "笑", "file": "emotes/joy.png"},
-    {"name": "爱心", "file": "emotes/heart.png"},
-    {"name": "惊讶", "file": "emotes/surprised.png"},
-    {"name": "火", "file": "emotes/fire.png"},
-    {"name": "哭", "file": "emotes/cry.png"}
+    {
+      "name": "赞",
+      "file": "emotes/thumbs_up.png"
+    },
+    {
+      "name": "笑",
+      "file": "emotes/joy.png"
+    },
+    {
+      "name": "爱心",
+      "file": "emotes/heart.png"
+    },
+    {
+      "name": "惊讶",
+      "file": "emotes/surprised.png"
+    },
+    {
+      "name": "火",
+      "file": "emotes/fire.png"
+    },
+    {
+      "name": "哭",
+      "file": "emotes/cry.png"
+    }
   ],
   "display": {
     "position": "bottom-center",

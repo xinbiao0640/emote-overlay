@@ -40,6 +40,12 @@ class EmoteWheel(QWidget):
 
         self._pixmaps = [_thumbnail(e) for e in self.emotes]
 
+    def current_emote(self):
+        """返回当前鼠标高亮的表情，未高亮则返回 None。"""
+        if 0 <= self._hover_index < len(self.emotes):
+            return self.emotes[self._hover_index]
+        return None
+
     def _index_at(self, pos):
         dx = pos.x() - self._center.x()
         dy = pos.y() - self._center.y()

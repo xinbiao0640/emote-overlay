@@ -73,12 +73,6 @@ class Overlay(QWidget):
         self._wheel_cfg = dict(cfg)
 
     # ---- 滚轮 ----
-    def toggle_wheel(self):
-        if self._wheel_visible():
-            self.close_wheel()
-        else:
-            self.open_wheel()
-
     def open_wheel(self):
         if not self._emotes:
             return
@@ -95,6 +89,15 @@ class Overlay(QWidget):
         )
         self._wheel.show()
         self._wheel.raise_()
+
+    def release_wheel(self):
+        """松开呼出键：选中当前高亮的表情并关闭滚轮。"""
+        if not self._wheel_visible():
+            return
+        emote = self._wheel.current_emote()
+        if emote is not None:
+            self.show_emote(emote)
+        self.close_wheel()
 
     def close_wheel(self):
         if self._wheel is not None:

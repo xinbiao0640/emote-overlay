@@ -49,6 +49,24 @@ def main():
     disp = EmoteDisplay(overlay)
     print("Overlay / EmoteDisplay 构造 OK")
 
+    # 5. 表情弹出
+    overlay.set_emotes(emotes)
+    overlay.show_emote(emotes[0])
+    app.processEvents()
+    assert overlay._emote_display.isVisible(), "表情未显示"
+    print("表情弹出 OK")
+
+    # 6. 松开选中并关闭滚轮
+    overlay.open_wheel()
+    app.processEvents()
+    assert overlay._wheel_visible(), "滚轮未打开"
+    overlay._wheel._hover_index = 0
+    assert overlay._wheel.current_emote() is emotes[0]
+    overlay.release_wheel()
+    app.processEvents()
+    assert not overlay._wheel_visible(), "松开后滚轮未关闭"
+    print("松开选中 OK")
+
     print("SMOKE_OK")
 
 
