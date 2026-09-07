@@ -35,10 +35,9 @@ def angle_index(dx, dy, n):
 
 
 class EmoteWheel(QWidget):
-    def __init__(self, parent, emotes, wheel_cfg, group_label=""):
+    def __init__(self, parent, emotes, wheel_cfg):
         super().__init__(parent)
         self.radius = int(wheel_cfg.get("radius", 130))
-        self.group_label = group_label
         self._hover_index = -1
 
         self.setAttribute(Qt.WA_TranslucentBackground)
@@ -58,10 +57,6 @@ class EmoteWheel(QWidget):
         self.emotes = list(emotes)
         self._pixmaps = [_thumbnail(e) for e in self.emotes]
         self._hover_index = -1
-        self.update()
-
-    def set_group_label(self, label):
-        self.group_label = label or ""
         self.update()
 
     def set_hover_index(self, idx):
@@ -120,19 +115,9 @@ class EmoteWheel(QWidget):
                     scaled,
                 )
 
-        # 中心锚点 + 分组标签（纯视觉，不作为死区）
+        # 中心锚点（纯视觉，不作为死区）
         center_r = 16
         p.setBrush(QBrush(QColor(15, 15, 15, 190)))
         p.setPen(QPen(QColor(255, 255, 255, 70), 2))
         p.drawEllipse(self._center, center_r, center_r)
-        if self.group_label:
-            p.setPen(QColor(255, 255, 255, 220))
-            font = p.font()
-            font.setPointSize(9)
-            p.setFont(font)
-            p.drawText(
-                QRectF(self._center.x() - 40, self._center.y() - 14, 80, 28),
-                Qt.AlignCenter,
-                self.group_label,
-            )
         p.end()

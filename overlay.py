@@ -49,6 +49,8 @@ class Overlay(QWidget):
             | Qt.Tool
             | Qt.WindowDoesNotAcceptFocus
         )
+        # 标题用于 OBS「窗口采集」枚举到本窗口（无边框下不会显示出来）
+        self.setWindowTitle("Emote Overlay")
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
 
@@ -84,13 +86,6 @@ class Overlay(QWidget):
             return group.get("emotes", []) if isinstance(group, dict) else group
         return []
 
-    def _current_label(self):
-        if 0 <= self._group_index < len(self._groups):
-            group = self._groups[self._group_index]
-            if isinstance(group, dict):
-                return group.get("name", "")
-        return ""
-
     def _switch_group(self, delta):
         total = len(self._groups)
         if total == 0:
@@ -98,7 +93,6 @@ class Overlay(QWidget):
         self._group_index = (self._group_index + delta) % total
         if self._wheel_visible():
             self._wheel.set_emotes(self._current_emotes())
-            self._wheel.set_group_label(self._current_label())
             self._wheel.set_hover_index(-1)
 
     # ---- 滚轮 ----
@@ -107,13 +101,12 @@ class Overlay(QWidget):
             return
         if self._wheel_visible():
             return
-        self._group_index = 0
         emotes = self._current_emotes()
         if not emotes:
             return
         _apply_click_through(int(self.winId()), False)
         self._wheel_center = QCursor.pos()
-        self._wheel = EmoteWheel(self, emotes, self._wheel_cfg, self._current_label())
+        self._wheel = EmoteWheel(self, emotes, self._wheel_cfg)
         cursor = QCursor.pos()
         local = self.mapFromGlobal(cursor)
         self._wheel.move(

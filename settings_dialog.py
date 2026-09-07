@@ -47,9 +47,10 @@ def _thumb(emote):
 
 
 class WheelPreview(QWidget):
-    """把当前分组的表情按滚轮位置画成一个可点击的圆形，直观反映最终布局。"""
+    """把当前分组的表情按滚轮位置画成可拖拽的圆形，拖动表情即可换位。"""
 
     selectionChanged = Signal(int)
+    reordered = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -57,12 +58,15 @@ class WheelPreview(QWidget):
         self._selected = -1
         self._pixmaps = []
         self._radius = 96
+        self._drag_index = -1
+        self._drag_pos = QPointF()
         self.setMinimumSize(240, 240)
 
     def set_emotes(self, emotes):
         self._emotes = list(emotes)
         self._pixmaps = [_thumb(e) for e in self._emotes]
         self._selected = -1
+        self._drag_index = -1
         self.update()
 
     def set_selected(self, index):
@@ -72,16 +76,43 @@ class WheelPreview(QWidget):
     def selected_index(self):
         return self._selected
 
+    def _index_at(self, pos):
+        if not self._emotes:
+            return -1
+        dx = pos.x() - self.width() / 2
+        dy = pos.y() - self.height() / 2
+        return angle_index(dx, dy, len(self._emotes))
+
     def mousePressEvent(self, event):
         if not self._emotes:
             return
-        pos = event.position()
-        dx = pos.x() - self.width() / 2
-        dy = pos.y() - self.height() / 2
-        idx = angle_index(dx, dy, len(self._emotes))
-        if idx >= 0:
-            self.set_selected(idx)
-            self.selectionChanged.emit(idx)
+        idx = self._index_at(event.position())
+        if idx < 0:
+            return
+        self.set_selected(idx)
+        self.selectionChanged.emit(idx)
+        self._drag_index = idx
+        self._drag_pos = event.position()
+        self.update()
+
+    def mouseMoveEvent(self, event):
+        if self._drag_index < 0:
+            return
+        self._drag_pos = event.position()
+        self.update()
+
+    def mouseReleaseEvent(self, event):
+        if self._drag_index < 0:
+            return
+        src = self._drag_index
+        dst = self._index_at(event.position())
+        self._drag_index = -1
+        if dst >= 0 and dst != src:
+            self._emotes.insert(dst, self._emotes.pop(src))
+            self._pixmaps.insert(dst, self._pixmaps.pop(src))
+            self._selected = dst
+            self.reordered.emit(list(self._emotes))
+        self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
@@ -98,17 +129,28 @@ class WheelPreview(QWidget):
                        self._radius * 2, self._radius * 2)
         angle_step = 360.0 / n
 
+        hover_idx = self._index_at(self._drag_pos) if self._drag_index >= 0 else -1
+
         for i in range(n):
             start_compass = i * angle_step
             qt_start = 90.0 - start_compass
             span = -angle_step
-            if i == self._selected:
+            if i == self._drag_index:
+                p.setBrush(QBrush(QColor(40, 40, 40, 90)))
+                p.setPen(QPen(QColor(255, 255, 255, 60), 2))
+            elif i == hover_idx:
+                p.setBrush(QBrush(QColor(90, 170, 255, 120)))
+                p.setPen(QPen(QColor(255, 255, 255, 180), 3))
+            elif i == self._selected:
                 p.setBrush(QBrush(QColor(90, 170, 255, 160)))
                 p.setPen(QPen(QColor(255, 255, 255, 220), 3))
             else:
                 p.setBrush(QBrush(QColor(40, 40, 40, 150)))
                 p.setPen(QPen(QColor(255, 255, 255, 90), 2))
             p.drawPie(outer, int(qt_start * 16), int(span * 16))
+
+            if i == self._drag_index:
+                continue  # 被拖拽的表情画在鼠标处
 
             mid = math.radians(start_compass + angle_step / 2)
             dist = self._radius * 0.62
@@ -124,6 +166,17 @@ class WheelPreview(QWidget):
         p.setBrush(QBrush(QColor(15, 15, 15, 190)))
         p.setPen(QPen(QColor(255, 255, 255, 70), 2))
         p.drawEllipse(center, 16, 16)
+
+        # 拖拽中的表情跟随鼠标
+        if self._drag_index >= 0:
+            pm = self._pixmaps[self._drag_index]
+            if pm is not None and not pm.isNull():
+                box = int(self._radius * 0.6)
+                scaled = pm.scaled(box, box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                p.setOpacity(0.85)
+                p.drawPixmap(int(self._drag_pos.x() - scaled.width() / 2),
+                             int(self._drag_pos.y() - scaled.height() / 2), scaled)
+                p.setOpacity(1.0)
         p.end()
 
 
@@ -195,6 +248,7 @@ class SettingsDialog(QDialog):
         emote_layout.addLayout(btn_row)
 
         self._preview.selectionChanged.connect(self._on_preview_select)
+        self._preview.reordered.connect(self._on_reordered)
         root.addWidget(emote_box)
 
         # 显示参数
@@ -349,6 +403,13 @@ class SettingsDialog(QDialog):
 
     def _on_preview_select(self, index):
         self._selected_index = index
+        self._update_emote_buttons()
+
+    def _on_reordered(self, new_order):
+        group = self._current_group()
+        if group is not None:
+            group["emotes"] = list(new_order)
+        self._selected_index = self._preview.selected_index()
         self._update_emote_buttons()
 
     def _update_emote_buttons(self):
