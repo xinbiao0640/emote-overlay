@@ -167,7 +167,7 @@ class WheelPreview(QWidget):
                 pen = QPen(QColor(255, 255, 255, 200), 3)
             elif i == self._selected:
                 brush = pal["highlight"]
-                pen = QPen(pal["highlight_border"], 3)
+                pen = Qt.NoPen
             elif is_empty:
                 brush = QColor(0, 0, 0, 30) if self._theme == "dark" else QColor(0, 0, 0, 18)
                 pen = QPen(pal["sector_border"], 1, Qt.DashLine)

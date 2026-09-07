@@ -69,7 +69,7 @@
     "size": 60,
     "duration": 1.0,
     "fade": true,
-    "monitor": 1,
+    "monitor": -1,
     "offset_y": 12,
     "return_cursor": true,
     "position": "cursor"

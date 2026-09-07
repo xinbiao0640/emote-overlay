@@ -68,7 +68,7 @@ class _RECT(ctypes.Structure):
 
 
 def _clip_cursor(rect):
-    """把系统光标限制在 rect 内（屏幕坐标）；传 None 解除限制。
+    """把系统光标限制在 rect 内（物理像素坐标）；传 None 解除限制。
 
     ClipCursor 只限制移动范围、不会像 SetCursorPos 那样重新显示光标，
     因此可与 ShowCursor(False) 配合实现「彻底隐藏且不漂移」。
@@ -196,10 +196,15 @@ class Overlay(QWidget):
             self.setCursor(Qt.BlankCursor)
             _hide_cursor()
             self._cursor_hidden = True
-            # 限制物理光标在一个小范围内，避免漂移导致光标重新出现
+            # 限制物理光标在一个小范围内，避免漂移导致光标重新出现。
+            # ClipCursor 用物理像素坐标，需按当前屏幕 DPI 缩放（否则高 DPI 下会偏移）。
             r = 40
-            _clip_cursor(QRect(
-                self._wheel_center.x() - r, self._wheel_center.y() - r, r * 2, r * 2))
+            screen = QGuiApplication.screenAt(self._wheel_center)
+            dpr = screen.devicePixelRatio() if screen else 1.0
+            cx = self._wheel_center.x() * dpr
+            cy = self._wheel_center.y() * dpr
+            rr = r * dpr
+            _clip_cursor(QRect(int(cx - rr), int(cy - rr), int(rr * 2), int(rr * 2)))
         self._wheel = EmoteWheel(self, emotes, self._wheel_cfg)
         cursor = QCursor.pos()
         local = self.mapFromGlobal(cursor)

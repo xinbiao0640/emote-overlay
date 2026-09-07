@@ -32,7 +32,6 @@ def theme_palette(theme):
             "sector": QColor(235, 235, 235, 190),
             "sector_border": QColor(120, 120, 120, 170),
             "highlight": QColor(232, 240, 255, 252),
-            "highlight_border": QColor(90, 140, 235, 255),
             "center": QColor(250, 250, 250, 230),
             "center_border": QColor(120, 120, 120, 140),
             "pointer": QColor(35, 35, 35, 235),
@@ -42,7 +41,6 @@ def theme_palette(theme):
         "sector": QColor(20, 20, 20, 170),
         "sector_border": QColor(255, 255, 255, 90),
         "highlight": QColor(30, 40, 64, 250),
-        "highlight_border": QColor(170, 200, 255, 255),
         "center": QColor(15, 15, 15, 190),
         "center_border": QColor(255, 255, 255, 70),
         "pointer": QColor(255, 255, 255, 230),
@@ -179,7 +177,7 @@ class EmoteWheel(QWidget):
 
             if i == self._hover_index:
                 p.setBrush(QBrush(pal["highlight"]))
-                p.setPen(QPen(pal["highlight_border"], 3))
+                p.setPen(Qt.NoPen)
             else:
                 p.setBrush(QBrush(pal["sector"]))
                 p.setPen(QPen(pal["sector_border"], 2))
@@ -234,7 +232,7 @@ class EmoteWheel(QWidget):
 
             if highlighted:
                 p.setBrush(QBrush(pal["highlight"]))
-                p.setPen(QPen(pal["highlight_border"], 4))
+                p.setPen(Qt.NoPen)
             else:
                 p.setBrush(QBrush(pal["sector"]))
                 p.setPen(QPen(pal["sector_border"], 2))
