@@ -294,10 +294,12 @@ class SettingsDialog(QDialog):
         d = self._config.get("display", {})
         self._monitor_combo.blockSignals(True)
         self._monitor_combo.clear()
+        self._monitor_combo.addItem("全部显示器", -1)
         for i, s in enumerate(QGuiApplication.screens()):
             g = s.geometry()
             self._monitor_combo.addItem(f"显示器 {i + 1}（{g.width()}×{g.height()}）", i)
-        self._monitor_combo.setCurrentIndex(int(d.get("monitor", 0)))
+        idx = self._monitor_combo.findData(int(d.get("monitor", 0)))
+        self._monitor_combo.setCurrentIndex(max(0, idx))
         self._monitor_combo.blockSignals(False)
 
         idx = self._pos_combo.findData(d.get("position", "bottom-center"))
@@ -310,8 +312,8 @@ class SettingsDialog(QDialog):
         self._selected_index = -1
         self._reload_preview()
 
-    def _on_monitor_changed(self, index):
-        self._config.setdefault("display", {})["monitor"] = index
+    def _on_monitor_changed(self, _index):
+        self._config.setdefault("display", {})["monitor"] = self._monitor_combo.currentData()
 
     # ---- 分组 ----
     def _current_group(self):
@@ -454,9 +456,18 @@ class SettingsDialog(QDialog):
         self._capture_thread = None
 
     # ---- 确认 ----
+    def _sync_display(self):
+        d = self._config.setdefault("display", {})
+        d["monitor"] = self._monitor_combo.currentData()
+        d["position"] = self._pos_combo.currentData()
+        d["size"] = self._size_spin.value()
+        d["duration"] = self._duration_spin.value()
+        d["fade"] = self._fade_check.isChecked()
+
     def _on_accept(self):
         if self._capture_thread is not None and self._capture_thread.isRunning():
             self._capture_thread.requestInterruption()
+        self._sync_display()
         self.accept()
 
     def get_config(self):

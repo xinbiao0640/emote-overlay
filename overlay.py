@@ -75,7 +75,6 @@ class Overlay(QWidget):
         self._wheel_center = None
         self._hover_timer = None
         self._last_emote = None
-        self._last_cursor = None
 
         self._emote_display = EmoteDisplay(self)
         self._emote_display.setGeometry(self.rect())
@@ -101,6 +100,8 @@ class Overlay(QWidget):
         self._wheel_cfg = dict(cfg)
 
     def _screen_geometry(self, index):
+        if index < 0:
+            return QGuiApplication.primaryScreen().virtualGeometry()
         screens = QGuiApplication.screens()
         if 0 <= index < len(screens):
             return screens[index].geometry()
@@ -181,19 +182,16 @@ class Overlay(QWidget):
     def release_wheel(self):
         """松开呼出键：选中当前高亮的表情并关闭滚轮。
 
-        若松开时鼠标停在中心（无方向）且与上次发送位置相同，则重复发送上一个表情，
-        方便连续快速发送同一个表情。
+        若松开时鼠标停在中心（无方向），则重复发送上一个表情，方便连续快速发送。
         """
         if not self._wheel_visible():
             return
         emote = self._wheel.current_emote()
-        cursor = QCursor.pos()
-        if emote is None and self._last_emote is not None and cursor == self._last_cursor:
+        if emote is None and self._last_emote is not None:
             emote = self._last_emote
         if emote is not None:
             self.show_emote(emote)
             self._last_emote = emote
-            self._last_cursor = cursor
         self.close_wheel()
 
     def close_wheel(self):
@@ -228,23 +226,23 @@ class Overlay(QWidget):
             local = self.mapFromGlobal(QCursor.pos())
             x = int(local.x() - size / 2)
             y = int(local.y() - size / 2)
-            return QRect(x, y, size, size)
-        x = y = 0
-        if pos == "center":
-            x, y = (w - size) // 2, (h - size) // 2
-        elif pos == "bottom-center":
-            x, y = (w - size) // 2, h - size - margin
-        elif pos == "top-center":
-            x, y = (w - size) // 2, margin
-        elif pos == "bottom-left":
-            x, y = margin, h - size - margin
-        elif pos == "bottom-right":
-            x, y = w - size - margin, h - size - margin
-        elif pos == "top-left":
-            x, y = margin, margin
-        elif pos == "top-right":
-            x, y = w - size - margin, margin
-        # 随机小偏移，避免连续发送的表情完全重叠
+        else:
+            x = y = 0
+            if pos == "center":
+                x, y = (w - size) // 2, (h - size) // 2
+            elif pos == "bottom-center":
+                x, y = (w - size) // 2, h - size - margin
+            elif pos == "top-center":
+                x, y = (w - size) // 2, margin
+            elif pos == "bottom-left":
+                x, y = margin, h - size - margin
+            elif pos == "bottom-right":
+                x, y = w - size - margin, h - size - margin
+            elif pos == "top-left":
+                x, y = margin, margin
+            elif pos == "top-right":
+                x, y = w - size - margin, margin
+        # 随机小偏移，避免连续发送的表情完全重叠（对所有位置生效）
         x += random.randint(-20, 20)
         y += random.randint(-20, 20)
         return QRect(x, y, size, size)
