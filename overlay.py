@@ -50,6 +50,18 @@ def _apply_click_through(hwnd: int, enabled: bool):
     )
 
 
+def _hide_cursor():
+    """把系统光标计数压到负数以确保隐藏；多压一层以抵抗一次外部 ShowCursor(True)。"""
+    while ctypes.windll.user32.ShowCursor(False) >= 0:
+        pass
+
+
+def _show_cursor():
+    """把系统光标计数恢复到非负，重新显示光标。"""
+    while ctypes.windll.user32.ShowCursor(True) < 0:
+        pass
+
+
 class Overlay(QWidget):
     def __init__(self, config):
         super().__init__()
@@ -124,11 +136,23 @@ class Overlay(QWidget):
             return group.get("emotes", []) if isinstance(group, dict) else group
         return []
 
+    def _ensure_nonempty_group(self):
+        """若当前分组为空，则前移到下一个非空分组；全空返回 False。"""
+        total = len(self._groups)
+        if total == 0:
+            return False
+        for _ in range(total):
+            if self._current_emotes():
+                return True
+            self._group_index = (self._group_index + 1) % total
+        return False
+
     def _switch_group(self, delta):
         total = len(self._groups)
         if total == 0:
             return
         self._group_index = (self._group_index + delta) % total
+        self._ensure_nonempty_group()
         if self._wheel_visible():
             self._wheel.set_emotes(self._current_emotes())
             self._wheel.set_hover_index(-1)
@@ -139,19 +163,17 @@ class Overlay(QWidget):
             return
         if self._wheel_visible():
             return
-        emotes = self._current_emotes()
-        if not emotes:
+        if not self._ensure_nonempty_group():
             return
+        emotes = self._current_emotes()
         _apply_click_through(int(self.winId()), False)
         self._wheel_center = QCursor.pos()
         self._wheel_style = self._wheel_cfg.get("style", "radial")
         if self._wheel_style == "sts2":
-            # 呼出时隐藏鼠标指针，改为中心圆内的自定义指针
+            # 隐藏系统光标，改由中心指针指示方向
             QGuiApplication.setOverrideCursor(Qt.BlankCursor)
-            try:
-                ctypes.windll.user32.ShowCursor(False)
-            except Exception:
-                pass
+            self.setCursor(Qt.BlankCursor)
+            _hide_cursor()
             self._cursor_hidden = True
         self._wheel = EmoteWheel(self, emotes, self._wheel_cfg)
         cursor = QCursor.pos()
@@ -188,26 +210,24 @@ class Overlay(QWidget):
         cursor = QCursor.pos()
         dx = cursor.x() - self._wheel_center.x()
         dy = cursor.y() - self._wheel_center.y()
-        self._wheel.set_hover_index(angle_index(dx, dy, n))
         if self._wheel_style == "sts2":
-            # 把鼠标物理位置限制在中心透明区域内（内圈以内），避免指针移出轮盘后重新显示
-            pointer_r = self._wheel.radius * 0.22
+            self._wheel.set_hover_index(angle_index(dx, dy, n, centered=True))
+            # 中心指针跟随鼠标方向，只限制显示长度；不移动物理光标（SetCursorPos 会导致其重新显示）
+            pointer_r = self._wheel.radius * 0.16
             dist = math.hypot(dx, dy)
             if dist > pointer_r:
                 k = pointer_r / dist
                 dx *= k
                 dy *= k
-                QCursor.setPos(
-                    int(self._wheel_center.x() + dx),
-                    int(self._wheel_center.y() + dy),
-                )
             self._wheel.set_pointer(dx, dy)
+        else:
+            self._wheel.set_hover_index(angle_index(dx, dy, n))
 
     def release_wheel(self):
         """松开呼出键：选中当前高亮的表情并关闭滚轮。
 
-        仅当鼠标停在中心（无方向）时重复发送上一个表情，方便连续快速发送；
-        指向空槽位（占位符）时不发送任何表情。
+        radial 风格下鼠标停在中心（无方向）时重复发送上一个表情，方便连续快速发送。
+        sts2 风格下中心指针始终有方向（默认沿用上次），松开即选中对应表情。
         """
         if not self._wheel_visible():
             return
@@ -229,14 +249,10 @@ class Overlay(QWidget):
             self._wheel.deleteLater()
             self._wheel = None
         if self._cursor_hidden:
-            # 先把（仍隐藏的）指针送回唤起位置，再恢复显示，避免闪烁
-            if self._wheel_center is not None:
-                QCursor.setPos(self._wheel_center)
-            try:
-                ctypes.windll.user32.ShowCursor(True)
-            except Exception:
-                pass
+            # 先恢复形状再显示，避免闪烁；光标留在当前（隐藏追踪）位置
+            self.unsetCursor()
             QGuiApplication.restoreOverrideCursor()
+            _show_cursor()
             self._cursor_hidden = False
         _apply_click_through(int(self.winId()), True)
 

@@ -27,7 +27,7 @@ from PySide6.QtWidgets import (
 from config import WHEEL_STYLES, WHEEL_STYLE_LABELS, WHEEL_THEMES, WHEEL_THEME_LABELS
 from emote_manager import import_emote
 from hotkey import KeyCaptureThread
-from wheel import angle_index, MIN_SLOTS, theme_palette, annular_sector
+from wheel import angle_index, INNER_RATIO, theme_palette, annular_sector
 
 
 def _thumb(emote):
@@ -49,7 +49,7 @@ def _thumb(emote):
 class WheelPreview(QWidget):
     """把当前分组的表情按滚轮位置画成可拖拽的圆形，拖动表情即可换位。
 
-    空槽用占位符补齐到 MIN_SLOTS，显示样式跟随设置（radial / sts2）。
+    显示样式跟随设置（radial / sts2）。
     """
 
     selectionChanged = Signal(int)
@@ -57,8 +57,7 @@ class WheelPreview(QWidget):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._emotes = []       # 真实表情（无占位），顺序来源
-        self._slots = []        # 含占位符的槽位，长度 >= MIN_SLOTS
+        self._slots = []        # 表情槽位（含空表情占位）
         self._pixmaps = []
         self._selected = -1
         self._radius = 96
@@ -77,61 +76,37 @@ class WheelPreview(QWidget):
         self.update()
 
     def set_emotes(self, emotes):
-        self._emotes = list(emotes)
         self._slots = list(emotes)
-        while len(self._slots) < MIN_SLOTS:
-            self._slots.append(None)
-        self._pixmaps = [_thumb(e) if e is not None else None for e in self._slots]
+        self._pixmaps = [_thumb(e) for e in self._slots]
         self._selected = -1
         self._drag_index = -1
         self.update()
 
     def set_selected(self, index):
-        # index 是真实表情索引，映射到对应槽位
-        self._selected = self._real_to_slot(index)
+        self._selected = index
         self.update()
 
     def selected_index(self):
-        return self._slot_to_real(self._selected)
-
-    def _slot_to_real(self, slot_idx):
-        """槽位索引 -> 真实表情索引；占位槽返回 -1。"""
-        if slot_idx < 0 or slot_idx >= len(self._slots):
-            return -1
-        if self._slots[slot_idx] is None:
-            return -1
-        return sum(1 for e in self._slots[:slot_idx] if e is not None)
-
-    def _real_to_slot(self, real_idx):
-        """真实表情索引 -> 槽位索引；无效返回 -1。"""
-        if real_idx < 0:
-            return -1
-        count = 0
-        for i, e in enumerate(self._slots):
-            if e is not None:
-                if count == real_idx:
-                    return i
-                count += 1
-        return -1
+        return self._selected
 
     def _index_at(self, pos):
         if not self._slots:
             return -1
         dx = pos.x() - self.width() / 2
         dy = pos.y() - self.height() / 2
-        return angle_index(dx, dy, len(self._slots))
+        return angle_index(dx, dy, len(self._slots), centered=(self._style == "sts2"))
 
     def mousePressEvent(self, event):
-        if not self._emotes:
+        if not self._slots:
             return
         idx = self._index_at(event.position())
         if idx < 0:
             return
         self._selected = idx
         self.update()
-        self.selectionChanged.emit(self._slot_to_real(idx))
-        # 只有真实表情才能拖动，占位槽只用于放置
-        if self._slots[idx] is not None:
+        self.selectionChanged.emit(idx)
+        # 只有真实表情才能拖动，空表情槽只用于放置
+        if self._slots[idx].get("file"):
             self._drag_index = idx
             self._drag_pos = event.position()
 
@@ -152,15 +127,13 @@ class WheelPreview(QWidget):
             self._slots[src], self._slots[dst] = self._slots[dst], self._slots[src]
             self._pixmaps[src], self._pixmaps[dst] = self._pixmaps[dst], self._pixmaps[src]
             self._selected = dst
-            # 剔除占位符，只把真实表情顺序发出去
-            self._emotes = [e for e in self._slots if e is not None]
-            self.reordered.emit(list(self._emotes))
+            self.reordered.emit(list(self._slots))
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        if not self._emotes:
+        if not self._slots:
             p.setPen(QColor(128, 128, 128, 160))
             p.drawText(self.rect(), Qt.AlignCenter, "该分组为空，点击下方「添加表情」")
             p.end()
@@ -172,7 +145,7 @@ class WheelPreview(QWidget):
         angle_step = 360.0 / n
         outer_r = self._radius
         is_sts2 = self._style == "sts2"
-        inner_r = outer_r * 0.35 if is_sts2 else 0.0
+        inner_r = outer_r * INNER_RATIO if is_sts2 else 0.0
         base_shift = outer_r * 0.05
 
         hover_idx = self._index_at(self._drag_pos) if self._drag_index >= 0 else -1
@@ -189,7 +162,7 @@ class WheelPreview(QWidget):
             outer = QRectF(center.x() - outer_r, center.y() - outer_r,
                            outer_r * 2, outer_r * 2)
 
-            is_placeholder = self._slots[i] is None
+            is_empty = not self._slots[i].get("file")
             if i == self._drag_index:
                 brush = QColor(0, 0, 0, 90) if self._theme == "dark" else QColor(0, 0, 0, 45)
                 pen = QPen(pal["sector_border"], 2)
@@ -199,7 +172,7 @@ class WheelPreview(QWidget):
             elif i == self._selected:
                 brush = pal["highlight"]
                 pen = QPen(pal["highlight_border"], 3)
-            elif is_placeholder:
+            elif is_empty:
                 brush = QColor(0, 0, 0, 30) if self._theme == "dark" else QColor(0, 0, 0, 18)
                 pen = QPen(pal["sector_border"], 1, Qt.DashLine)
             else:
@@ -216,8 +189,8 @@ class WheelPreview(QWidget):
             else:
                 p.drawPie(outer, int(qt_start * 16), int(-span * 16))
 
-            if i == self._drag_index or is_placeholder:
-                continue  # 被拖拽的表情画在鼠标处；占位槽无缩略图
+            if i == self._drag_index or is_empty:
+                continue  # 被拖拽的表情画在鼠标处；空表情槽无缩略图
 
             mid = math.radians(i * angle_step) if is_sts2 else math.radians(start_compass + span / 2)
             dist = (outer_r + inner_r) / 2 + base_shift if is_sts2 else outer_r * 0.62
@@ -229,11 +202,6 @@ class WheelPreview(QWidget):
                 scaled = pm.scaled(box, box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 p.drawPixmap(int(cx - scaled.width() / 2),
                              int(cy - scaled.height() / 2), scaled)
-
-        if not is_sts2:
-            p.setBrush(QBrush(pal["center"]))
-            p.setPen(QPen(pal["center_border"], 2))
-            p.drawEllipse(center, 14, 14)
 
         # 拖拽中的表情跟随鼠标
         if self._drag_index >= 0:
@@ -303,15 +271,13 @@ class SettingsDialog(QDialog):
         btn_row = QHBoxLayout()
         self._add_btn = QPushButton("添加表情")
         self._add_btn.clicked.connect(self._add_emotes)
+        self._add_empty_btn = QPushButton("添加空表情")
+        self._add_empty_btn.clicked.connect(self._add_empty_emote)
         self._remove_btn = QPushButton("删除")
         self._remove_btn.clicked.connect(self._remove_emote)
         self._rename_btn = QPushButton("重命名")
         self._rename_btn.clicked.connect(self._rename_emote)
-        self._up_btn = QPushButton("上移")
-        self._up_btn.clicked.connect(lambda: self._move_emote(-1))
-        self._down_btn = QPushButton("下移")
-        self._down_btn.clicked.connect(lambda: self._move_emote(1))
-        for b in (self._add_btn, self._remove_btn, self._rename_btn, self._up_btn, self._down_btn):
+        for b in (self._add_btn, self._add_empty_btn, self._remove_btn, self._rename_btn):
             btn_row.addWidget(b)
         emote_layout.addLayout(btn_row)
 
@@ -506,17 +472,12 @@ class SettingsDialog(QDialog):
         if ok and name.strip():
             emotes[self._selected_index]["name"] = name.strip()
 
-    def _move_emote(self, delta):
+    def _add_empty_emote(self):
         group = self._current_group()
-        if group is None or self._selected_index < 0:
+        if group is None:
             return
-        emotes = group.get("emotes", [])
-        if len(emotes) < 2 or not (0 <= self._selected_index < len(emotes)):
-            return
-        i = self._selected_index
-        j = (i + delta) % len(emotes)
-        emotes.insert(j, emotes.pop(i))
-        self._selected_index = j
+        group.setdefault("emotes", []).append({"file": "", "name": ""})
+        self._selected_index = len(group["emotes"]) - 1
         self._reload_preview()
 
     def _on_preview_select(self, index):
@@ -533,10 +494,11 @@ class SettingsDialog(QDialog):
     def _update_emote_buttons(self):
         group = self._current_group()
         emotes = group.get("emotes", []) if group else []
-        # 选中槽位必须在真实表情范围内（占位槽不可删除/重命名/移动）
         selected = group is not None and 0 <= self._selected_index < len(emotes)
-        for b in (self._remove_btn, self._rename_btn, self._up_btn, self._down_btn):
-            b.setEnabled(selected)
+        self._remove_btn.setEnabled(selected)
+        # 重命名仅对真实表情有效（空表情无名称）
+        rename_ok = selected and bool(emotes[self._selected_index].get("file"))
+        self._rename_btn.setEnabled(rename_ok)
 
     # ---- 快捷键绑定 ----
     def _start_capture(self, target):

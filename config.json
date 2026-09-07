@@ -6,20 +6,12 @@
       "name": "默认",
       "emotes": [
         {
-          "file": "emotes/joy.png",
-          "name": "笑"
-        },
-        {
-          "file": "emotes/heart.png",
-          "name": "爱心"
-        },
-        {
-          "file": "emotes/thumbs_up.png",
-          "name": "赞"
-        },
-        {
           "file": "emotes/1.png",
           "name": "1"
+        },
+        {
+          "file": "emotes/joy.png",
+          "name": "笑"
         },
         {
           "file": "emotes/cry.png",
@@ -32,6 +24,14 @@
         {
           "file": "emotes/fire.png",
           "name": "火"
+        },
+        {
+          "file": "emotes/thumbs_up.png",
+          "name": "赞"
+        },
+        {
+          "file": "emotes/heart.png",
+          "name": "爱心"
         }
       ]
     },
@@ -56,6 +56,6 @@
   "wheel": {
     "radius": 130,
     "style": "sts2",
-    "theme": "dark"
+    "theme": "light"
   }
 }

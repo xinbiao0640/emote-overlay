@@ -6,13 +6,15 @@ from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QMovie, QPolygonF, QPainterPath
 from PySide6.QtWidgets import QWidget
 
-# 表情过少时用空占位槽补足，让轮盘看起来完整自然
-MIN_SLOTS = 8
+# sts2 扇环内半径比例：越小中心透明区域越小，扇环越接近三角形
+INNER_RATIO = 0.28
 
 
 def _thumbnail(emote):
-    """GIF 取第一帧做缩略图，PNG/WebP 直接加载。"""
+    """GIF 取第一帧做缩略图，PNG/WebP 直接加载；空表情返回 None。"""
     path = emote.get("file", "")
+    if not path:
+        return None
     if os.path.splitext(path)[1].lower() == ".gif":
         movie = QMovie(path)
         if movie.isValid():
@@ -48,18 +50,24 @@ def theme_palette(theme):
     }
 
 
-def angle_index(dx, dy, n):
-    """根据鼠标相对滚轮中心的方向向量，计算高亮的表情索引。
+def angle_index(dx, dy, n, centered=False):
+    """根据方向向量计算高亮的表情索引。
 
     只看方向角度、不限制距离，无中心死区：只要不是恰好在中心点，
     移动多远都能选中对应方向的表情。中心点返回 -1（无选中）。
+
+    centered=False：扇区边界落在 i*step（radial 布局）。
+    centered=True：扇区中心落在 i*step（sts2 布局，正上方是 0 号扇区中心）。
     """
     if n == 0 or (dx == 0 and dy == 0):
         return -1
     theta = math.degrees(math.atan2(dx, -dy))
     if theta < 0:
         theta += 360.0
-    return int(theta // (360.0 / n)) % n
+    step = 360.0 / n
+    if centered:
+        theta += step / 2
+    return int(theta // step) % n
 
 
 def annular_sector(center, outer_r, inner_r, start_compass, span):
@@ -109,16 +117,13 @@ class EmoteWheel(QWidget):
 
     def set_emotes(self, emotes):
         self.emotes = list(emotes)
-        # 不足 MIN_SLOTS 时用 None 占位补足，占位槽不显示缩略图、不可选中
-        while len(self.emotes) < MIN_SLOTS:
-            self.emotes.append(None)
-        self._pixmaps = [_thumbnail(e) if e is not None else None for e in self.emotes]
+        self._pixmaps = [_thumbnail(e) for e in self.emotes]
         self._hover_index = -1
         self._pointer = QPointF(0, 0)
         self.update()
 
     def slot_count(self):
-        """返回实际槽位数量（含占位），供 overlay 计算高亮角度。"""
+        """返回槽位数量，供 overlay 计算高亮角度。"""
         return len(self.emotes)
 
     def set_hover_index(self, idx):
@@ -134,9 +139,11 @@ class EmoteWheel(QWidget):
             self.update()
 
     def current_emote(self):
-        """返回当前高亮的表情，未高亮则返回 None。"""
+        """返回当前高亮的表情，未高亮或空表情返回 None。"""
         if 0 <= self._hover_index < len(self.emotes):
-            return self.emotes[self._hover_index]
+            emote = self.emotes[self._hover_index]
+            if emote.get("file"):
+                return emote
         return None
 
     def hover_index(self):
@@ -195,11 +202,6 @@ class EmoteWheel(QWidget):
                     scaled,
                 )
 
-        # 中心锚点（纯视觉，不作为死区）
-        center_r = 16
-        p.setBrush(QBrush(pal["center"]))
-        p.setPen(QPen(pal["center_border"], 2))
-        p.drawEllipse(self._center, center_r, center_r)
         p.end()
 
     def _paint_sts2(self, event):
@@ -212,7 +214,7 @@ class EmoteWheel(QWidget):
 
         pal = theme_palette(self.theme)
         outer_r = self.radius
-        inner_r = self.radius * 0.35   # 内圈半径：以内为透明中心区域
+        inner_r = self.radius * INNER_RATIO   # 内圈半径：以内为透明中心区域
         angle_step = 360.0 / n
         base_shift = self.radius * 0.05   # 每个扇环沿径向平移，撕出平行缝隙
         extra = self.radius * 0.05        # 高亮扇环额外突起

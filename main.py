@@ -3,7 +3,7 @@ import sys
 
 from PySide6.QtCore import Qt, QSharedMemory
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox, QDialog
 
 import config as config_mod
 from overlay import Overlay
@@ -56,13 +56,29 @@ def main():
         overlay.set_wheel_cfg(new_cfg.get("wheel", {}))
         hotkeys.set_hotkeys(new_cfg.get("hotkey_open"), new_cfg.get("hotkey_dismiss"))
 
+    settings_dialog = None
+
     def open_settings():
+        nonlocal settings_dialog
+        # 非模态：设置窗口打开期间仍可呼出滚轮切换分组
+        if settings_dialog is not None and settings_dialog.isVisible():
+            settings_dialog.raise_()
+            settings_dialog.activateWindow()
+            return
         dlg = SettingsDialog(cfg)
-        if dlg.exec():
-            new_cfg = dlg.get_config()
-            cfg.clear()
-            cfg.update(new_cfg)
-            apply_config(cfg)
+        settings_dialog = dlg
+
+        def on_finished(result):
+            nonlocal settings_dialog
+            if result == QDialog.Accepted:
+                new_cfg = dlg.get_config()
+                cfg.clear()
+                cfg.update(new_cfg)
+                apply_config(cfg)
+            settings_dialog = None
+
+        dlg.finished.connect(on_finished)
+        dlg.show()
 
     tray = QSystemTrayIcon(make_tray_icon(), app)
     tray.setToolTip("表情 Overlay")
