@@ -198,7 +198,7 @@ class Overlay(QWidget):
             self._cursor_hidden = True
             # 限制物理光标在一个小范围内，避免漂移导致光标重新出现
             r = 40
-            self._clip_cursor(QRect(
+            _clip_cursor(QRect(
                 self._wheel_center.x() - r, self._wheel_center.y() - r, r * 2, r * 2))
         self._wheel = EmoteWheel(self, emotes, self._wheel_cfg)
         cursor = QCursor.pos()
