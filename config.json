@@ -6,43 +6,56 @@
       "name": "默认",
       "emotes": [
         {
-          "name": "赞",
-          "file": "emotes/thumbs_up.png"
+          "file": "emotes/joy.png",
+          "name": "笑"
         },
         {
-          "name": "笑",
-          "file": "emotes/joy.png"
+          "file": "emotes/heart.png",
+          "name": "爱心"
         },
         {
-          "name": "爱心",
-          "file": "emotes/heart.png"
+          "file": "emotes/thumbs_up.png",
+          "name": "赞"
         },
         {
-          "name": "惊讶",
-          "file": "emotes/surprised.png"
+          "file": "emotes/1.png",
+          "name": "1"
         },
         {
-          "name": "1",
-          "file": "emotes/1.png"
+          "file": "emotes/cry.png",
+          "name": "哭"
         },
         {
-          "name": "火",
-          "file": "emotes/fire.png"
+          "file": "emotes/surprised.png",
+          "name": "惊讶"
         },
         {
-          "name": "哭",
-          "file": "emotes/cry.png"
+          "file": "emotes/fire.png",
+          "name": "火"
+        }
+      ]
+    },
+    {
+      "name": "分组 2",
+      "emotes": [
+        {
+          "file": "emotes/fbjb.png",
+          "name": "fbjb"
         }
       ]
     }
   ],
   "display": {
-    "position": "cursor",
-    "size": 120,
-    "duration": 2.5,
-    "fade": true
+    "size": 60,
+    "duration": 1.0,
+    "fade": true,
+    "monitor": 1,
+    "offset_y": 12,
+    "position": "cursor"
   },
   "wheel": {
-    "radius": 130
+    "radius": 130,
+    "style": "sts2",
+    "theme": "dark"
   }
 }

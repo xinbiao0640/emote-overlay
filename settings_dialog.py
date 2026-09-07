@@ -24,10 +24,10 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
-import config as config_mod
+from config import WHEEL_STYLES, WHEEL_STYLE_LABELS, WHEEL_THEMES, WHEEL_THEME_LABELS
 from emote_manager import import_emote
 from hotkey import KeyCaptureThread
-from wheel import angle_index
+from wheel import angle_index, MIN_SLOTS, theme_palette, annular_sector
 
 
 def _thumb(emote):
@@ -47,41 +47,79 @@ def _thumb(emote):
 
 
 class WheelPreview(QWidget):
-    """把当前分组的表情按滚轮位置画成可拖拽的圆形，拖动表情即可换位。"""
+    """把当前分组的表情按滚轮位置画成可拖拽的圆形，拖动表情即可换位。
+
+    空槽用占位符补齐到 MIN_SLOTS，显示样式跟随设置（radial / sts2）。
+    """
 
     selectionChanged = Signal(int)
     reordered = Signal(list)
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._emotes = []
-        self._selected = -1
+        self._emotes = []       # 真实表情（无占位），顺序来源
+        self._slots = []        # 含占位符的槽位，长度 >= MIN_SLOTS
         self._pixmaps = []
+        self._selected = -1
         self._radius = 96
+        self._style = "radial"
+        self._theme = "dark"
         self._drag_index = -1
         self._drag_pos = QPointF()
         self.setMinimumSize(240, 240)
 
+    def set_style(self, style):
+        self._style = style
+        self.update()
+
+    def set_theme(self, theme):
+        self._theme = theme
+        self.update()
+
     def set_emotes(self, emotes):
         self._emotes = list(emotes)
-        self._pixmaps = [_thumb(e) for e in self._emotes]
+        self._slots = list(emotes)
+        while len(self._slots) < MIN_SLOTS:
+            self._slots.append(None)
+        self._pixmaps = [_thumb(e) if e is not None else None for e in self._slots]
         self._selected = -1
         self._drag_index = -1
         self.update()
 
     def set_selected(self, index):
-        self._selected = index
+        # index 是真实表情索引，映射到对应槽位
+        self._selected = self._real_to_slot(index)
         self.update()
 
     def selected_index(self):
-        return self._selected
+        return self._slot_to_real(self._selected)
+
+    def _slot_to_real(self, slot_idx):
+        """槽位索引 -> 真实表情索引；占位槽返回 -1。"""
+        if slot_idx < 0 or slot_idx >= len(self._slots):
+            return -1
+        if self._slots[slot_idx] is None:
+            return -1
+        return sum(1 for e in self._slots[:slot_idx] if e is not None)
+
+    def _real_to_slot(self, real_idx):
+        """真实表情索引 -> 槽位索引；无效返回 -1。"""
+        if real_idx < 0:
+            return -1
+        count = 0
+        for i, e in enumerate(self._slots):
+            if e is not None:
+                if count == real_idx:
+                    return i
+                count += 1
+        return -1
 
     def _index_at(self, pos):
-        if not self._emotes:
+        if not self._slots:
             return -1
         dx = pos.x() - self.width() / 2
         dy = pos.y() - self.height() / 2
-        return angle_index(dx, dy, len(self._emotes))
+        return angle_index(dx, dy, len(self._slots))
 
     def mousePressEvent(self, event):
         if not self._emotes:
@@ -89,11 +127,13 @@ class WheelPreview(QWidget):
         idx = self._index_at(event.position())
         if idx < 0:
             return
-        self.set_selected(idx)
-        self.selectionChanged.emit(idx)
-        self._drag_index = idx
-        self._drag_pos = event.position()
+        self._selected = idx
         self.update()
+        self.selectionChanged.emit(self._slot_to_real(idx))
+        # 只有真实表情才能拖动，占位槽只用于放置
+        if self._slots[idx] is not None:
+            self._drag_index = idx
+            self._drag_pos = event.position()
 
     def mouseMoveEvent(self, event):
         if self._drag_index < 0:
@@ -108,70 +148,98 @@ class WheelPreview(QWidget):
         dst = self._index_at(event.position())
         self._drag_index = -1
         if dst >= 0 and dst != src:
-            self._emotes.insert(dst, self._emotes.pop(src))
-            self._pixmaps.insert(dst, self._pixmaps.pop(src))
+            # 直接交换两个槽位，其余表情位置保持不变
+            self._slots[src], self._slots[dst] = self._slots[dst], self._slots[src]
+            self._pixmaps[src], self._pixmaps[dst] = self._pixmaps[dst], self._pixmaps[src]
             self._selected = dst
+            # 剔除占位符，只把真实表情顺序发出去
+            self._emotes = [e for e in self._slots if e is not None]
             self.reordered.emit(list(self._emotes))
         self.update()
 
     def paintEvent(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
-        n = len(self._emotes)
-        if n == 0:
-            p.setPen(QColor(255, 255, 255, 140))
+        if not self._emotes:
+            p.setPen(QColor(128, 128, 128, 160))
             p.drawText(self.rect(), Qt.AlignCenter, "该分组为空，点击下方「添加表情」")
             p.end()
             return
 
+        pal = theme_palette(self._theme)
         center = QPointF(self.width() / 2, self.height() / 2)
-        outer = QRectF(center.x() - self._radius, center.y() - self._radius,
-                       self._radius * 2, self._radius * 2)
+        n = len(self._slots)
         angle_step = 360.0 / n
+        outer_r = self._radius
+        is_sts2 = self._style == "sts2"
+        inner_r = outer_r * 0.35 if is_sts2 else 0.0
+        base_shift = outer_r * 0.05
 
         hover_idx = self._index_at(self._drag_pos) if self._drag_index >= 0 else -1
 
         for i in range(n):
-            start_compass = i * angle_step
-            qt_start = 90.0 - start_compass
-            span = -angle_step
-            if i == self._drag_index:
-                p.setBrush(QBrush(QColor(40, 40, 40, 90)))
-                p.setPen(QPen(QColor(255, 255, 255, 60), 2))
-            elif i == hover_idx:
-                p.setBrush(QBrush(QColor(90, 170, 255, 120)))
-                p.setPen(QPen(QColor(255, 255, 255, 180), 3))
-            elif i == self._selected:
-                p.setBrush(QBrush(QColor(90, 170, 255, 160)))
-                p.setPen(QPen(QColor(255, 255, 255, 220), 3))
+            if is_sts2:
+                # gap=0：扇环紧贴，中心落在 i*angle_step（i=0 即正上方）
+                start_compass = i * angle_step - angle_step / 2
+                span = angle_step
             else:
-                p.setBrush(QBrush(QColor(40, 40, 40, 150)))
-                p.setPen(QPen(QColor(255, 255, 255, 90), 2))
-            p.drawPie(outer, int(qt_start * 16), int(span * 16))
+                start_compass = i * angle_step
+                span = angle_step
+            qt_start = 90.0 - start_compass
+            outer = QRectF(center.x() - outer_r, center.y() - outer_r,
+                           outer_r * 2, outer_r * 2)
 
+            is_placeholder = self._slots[i] is None
             if i == self._drag_index:
-                continue  # 被拖拽的表情画在鼠标处
+                brush = QColor(0, 0, 0, 90) if self._theme == "dark" else QColor(0, 0, 0, 45)
+                pen = QPen(pal["sector_border"], 2)
+            elif i == hover_idx:
+                brush = QColor(90, 170, 255, 120)
+                pen = QPen(QColor(255, 255, 255, 180), 3)
+            elif i == self._selected:
+                brush = pal["highlight"]
+                pen = QPen(pal["highlight_border"], 3)
+            elif is_placeholder:
+                brush = QColor(0, 0, 0, 30) if self._theme == "dark" else QColor(0, 0, 0, 18)
+                pen = QPen(pal["sector_border"], 1, Qt.DashLine)
+            else:
+                brush = pal["sector"]
+                pen = QPen(pal["sector_border"], 2)
 
-            mid = math.radians(start_compass + angle_step / 2)
-            dist = self._radius * 0.62
+            p.setBrush(QBrush(brush))
+            p.setPen(pen)
+            if is_sts2:
+                path = annular_sector(center, outer_r, inner_r, start_compass, span)
+                sector_mid = math.radians(i * angle_step)
+                path.translate(base_shift * math.sin(sector_mid), -base_shift * math.cos(sector_mid))
+                p.drawPath(path)
+            else:
+                p.drawPie(outer, int(qt_start * 16), int(-span * 16))
+
+            if i == self._drag_index or is_placeholder:
+                continue  # 被拖拽的表情画在鼠标处；占位槽无缩略图
+
+            mid = math.radians(i * angle_step) if is_sts2 else math.radians(start_compass + span / 2)
+            dist = (outer_r + inner_r) / 2 + base_shift if is_sts2 else outer_r * 0.62
             cx = center.x() + dist * math.sin(mid)
             cy = center.y() - dist * math.cos(mid)
             pm = self._pixmaps[i]
             if pm is not None and not pm.isNull():
-                box = int(self._radius * 0.46)
+                box = int(outer_r * 0.46)
                 scaled = pm.scaled(box, box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 p.drawPixmap(int(cx - scaled.width() / 2),
                              int(cy - scaled.height() / 2), scaled)
 
-        p.setBrush(QBrush(QColor(15, 15, 15, 190)))
-        p.setPen(QPen(QColor(255, 255, 255, 70), 2))
-        p.drawEllipse(center, 16, 16)
+        if not is_sts2:
+            p.setBrush(QBrush(pal["center"]))
+            p.setPen(QPen(pal["center_border"], 2))
+            p.drawEllipse(center, 14, 14)
 
         # 拖拽中的表情跟随鼠标
         if self._drag_index >= 0:
             pm = self._pixmaps[self._drag_index]
             if pm is not None and not pm.isNull():
-                box = int(self._radius * 0.6)
+                box = int(outer_r * 0.6)
                 scaled = pm.scaled(box, box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
                 p.setOpacity(0.85)
                 p.drawPixmap(int(self._drag_pos.x() - scaled.width() / 2),
@@ -256,23 +324,44 @@ class SettingsDialog(QDialog):
         display_form = QFormLayout(display_box)
         self._monitor_combo = QComboBox()
         self._monitor_combo.currentIndexChanged.connect(self._on_monitor_changed)
-        self._pos_combo = QComboBox()
-        for p in config_mod.POSITIONS:
-            self._pos_combo.addItem(config_mod.POSITION_LABELS.get(p, p), p)
         self._size_spin = QSpinBox()
-        self._size_spin.setRange(64, 512)
+        self._size_spin.setRange(16, 512)
         self._size_spin.setSuffix(" px")
+        self._offset_spin = QSpinBox()
+        self._offset_spin.setRange(0, 200)
+        self._offset_spin.setSuffix(" px")
         self._duration_spin = QDoubleSpinBox()
         self._duration_spin.setRange(0.5, 10.0)
         self._duration_spin.setSingleStep(0.1)
         self._duration_spin.setSuffix(" 秒")
         self._fade_check = QCheckBox("淡入淡出")
         display_form.addRow("显示器", self._monitor_combo)
-        display_form.addRow("弹出位置", self._pos_combo)
         display_form.addRow("表情大小", self._size_spin)
+        display_form.addRow("上方偏移", self._offset_spin)
         display_form.addRow("显示时长", self._duration_spin)
         display_form.addRow("", self._fade_check)
         root.addWidget(display_box)
+
+        # 轮盘风格
+        wheel_box = QGroupBox("轮盘")
+        wheel_form = QFormLayout(wheel_box)
+        self._style_combo = QComboBox()
+        for s in WHEEL_STYLES:
+            self._style_combo.addItem(WHEEL_STYLE_LABELS.get(s, s), s)
+        self._style_combo.currentIndexChanged.connect(self._on_wheel_setting_changed)
+        wheel_form.addRow("风格", self._style_combo)
+
+        self._radius_spin = QSpinBox()
+        self._radius_spin.setRange(80, 400)
+        self._radius_spin.setSuffix(" px")
+        wheel_form.addRow("半径", self._radius_spin)
+
+        self._theme_combo = QComboBox()
+        for t in WHEEL_THEMES:
+            self._theme_combo.addItem(WHEEL_THEME_LABELS.get(t, t), t)
+        self._theme_combo.currentIndexChanged.connect(self._on_wheel_setting_changed)
+        wheel_form.addRow("主题", self._theme_combo)
+        root.addWidget(wheel_box)
 
         # 确认 / 取消
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -302,18 +391,29 @@ class SettingsDialog(QDialog):
         self._monitor_combo.setCurrentIndex(max(0, idx))
         self._monitor_combo.blockSignals(False)
 
-        idx = self._pos_combo.findData(d.get("position", "bottom-center"))
-        if idx >= 0:
-            self._pos_combo.setCurrentIndex(idx)
         self._size_spin.setValue(int(d.get("size", 220)))
+        self._offset_spin.setValue(int(d.get("offset_y", 12)))
         self._duration_spin.setValue(float(d.get("duration", 2.5)))
         self._fade_check.setChecked(bool(d.get("fade", True)))
+
+        w = self._config.get("wheel", {})
+        idx = self._style_combo.findData(w.get("style", "radial"))
+        self._style_combo.setCurrentIndex(max(0, idx))
+        self._radius_spin.setValue(int(w.get("radius", 130)))
+        idx = self._theme_combo.findData(w.get("theme", "dark"))
+        self._theme_combo.setCurrentIndex(max(0, idx))
 
         self._selected_index = -1
         self._reload_preview()
 
     def _on_monitor_changed(self, _index):
         self._config.setdefault("display", {})["monitor"] = self._monitor_combo.currentData()
+
+    def _on_wheel_setting_changed(self):
+        # 风格 / 主题变化时即时刷新预览
+        if hasattr(self, "_preview"):
+            self._preview.set_style(self._style_combo.currentData())
+            self._preview.set_theme(self._theme_combo.currentData())
 
     # ---- 分组 ----
     def _current_group(self):
@@ -326,6 +426,8 @@ class SettingsDialog(QDialog):
     def _reload_preview(self):
         group = self._current_group()
         emotes = group.get("emotes", []) if group else []
+        self._preview.set_style(self._style_combo.currentData())
+        self._preview.set_theme(self._theme_combo.currentData())
         self._preview.set_emotes(emotes)
         self._preview.set_selected(self._selected_index)
         self._update_emote_buttons()
@@ -429,8 +531,10 @@ class SettingsDialog(QDialog):
         self._update_emote_buttons()
 
     def _update_emote_buttons(self):
-        has = self._current_group() is not None
-        selected = has and self._selected_index >= 0
+        group = self._current_group()
+        emotes = group.get("emotes", []) if group else []
+        # 选中槽位必须在真实表情范围内（占位槽不可删除/重命名/移动）
+        selected = group is not None and 0 <= self._selected_index < len(emotes)
         for b in (self._remove_btn, self._rename_btn, self._up_btn, self._down_btn):
             b.setEnabled(selected)
 
@@ -459,10 +563,15 @@ class SettingsDialog(QDialog):
     def _sync_display(self):
         d = self._config.setdefault("display", {})
         d["monitor"] = self._monitor_combo.currentData()
-        d["position"] = self._pos_combo.currentData()
         d["size"] = self._size_spin.value()
+        d["offset_y"] = self._offset_spin.value()
         d["duration"] = self._duration_spin.value()
         d["fade"] = self._fade_check.isChecked()
+
+        wheel = self._config.setdefault("wheel", {})
+        wheel["style"] = self._style_combo.currentData()
+        wheel["radius"] = self._radius_spin.value()
+        wheel["theme"] = self._theme_combo.currentData()
 
     def _on_accept(self):
         if self._capture_thread is not None and self._capture_thread.isRunning():

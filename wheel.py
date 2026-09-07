@@ -3,8 +3,11 @@ import math
 import os
 
 from PySide6.QtCore import Qt, QPointF, QRectF
-from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QMovie
+from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QMovie, QPolygonF, QPainterPath
 from PySide6.QtWidgets import QWidget
+
+# 表情过少时用空占位槽补足，让轮盘看起来完整自然
+MIN_SLOTS = 8
 
 
 def _thumbnail(emote):
@@ -18,6 +21,31 @@ def _thumbnail(emote):
             movie.stop()
             return pm
     return QPixmap(path)
+
+
+def theme_palette(theme):
+    """返回轮盘主题配色，供滚轮与设置预览共用。"""
+    if theme == "light":
+        return {
+            "sector": QColor(235, 235, 235, 190),
+            "sector_border": QColor(120, 120, 120, 170),
+            "highlight": QColor(90, 170, 255, 210),
+            "highlight_border": QColor(255, 255, 255, 240),
+            "center": QColor(250, 250, 250, 230),
+            "center_border": QColor(120, 120, 120, 140),
+            "pointer": QColor(35, 35, 35, 235),
+            "pointer_border": QColor(255, 255, 255, 210),
+        }
+    return {
+        "sector": QColor(20, 20, 20, 170),
+        "sector_border": QColor(255, 255, 255, 90),
+        "highlight": QColor(90, 170, 255, 200),
+        "highlight_border": QColor(255, 255, 255, 220),
+        "center": QColor(15, 15, 15, 190),
+        "center_border": QColor(255, 255, 255, 70),
+        "pointer": QColor(255, 255, 255, 230),
+        "pointer_border": QColor(0, 0, 0, 120),
+    }
 
 
 def angle_index(dx, dy, n):
@@ -34,17 +62,43 @@ def angle_index(dx, dy, n):
     return int(theta // (360.0 / n)) % n
 
 
+def annular_sector(center, outer_r, inner_r, start_compass, span):
+    """构造扇环路径：外弧 + 两条径向边 + 内弧，中心（内圈以内）留空透明。
+
+    start_compass 为罗盘角（0°=12点，顺时针），span 为顺时针跨度（度）。
+    """
+    start = math.radians(start_compass)
+    p1 = QPointF(center.x() + outer_r * math.sin(start),
+                 center.y() - outer_r * math.cos(start))
+    outer_rect = QRectF(center.x() - outer_r, center.y() - outer_r,
+                        outer_r * 2, outer_r * 2)
+    inner_rect = QRectF(center.x() - inner_r, center.y() - inner_r,
+                        inner_r * 2, inner_r * 2)
+    qt_start = 90.0 - start_compass
+    qt_end = 90.0 - (start_compass + span)
+
+    path = QPainterPath()
+    path.moveTo(p1)
+    path.arcTo(outer_rect, qt_start, -span)   # 外弧（顺时针）
+    path.arcTo(inner_rect, qt_end, span)      # 内弧（逆时针，回起点）
+    path.closeSubpath()
+    return path
+
+
 class EmoteWheel(QWidget):
     def __init__(self, parent, emotes, wheel_cfg):
         super().__init__(parent)
         self.radius = int(wheel_cfg.get("radius", 130))
+        self.style = wheel_cfg.get("style", "radial")
+        self.theme = wheel_cfg.get("theme", "dark")
         self._hover_index = -1
+        self._pointer = QPointF(0, 0)
 
         self.setAttribute(Qt.WA_TranslucentBackground)
         # 滚轮本身不接收鼠标事件，交给 overlay 统一处理（滚轮切换分组等）
         self.setAttribute(Qt.WA_TransparentForMouseEvents)
 
-        padding = 20
+        padding = 24
         size = (self.radius + padding) * 2
         self.resize(size, size)
         self._center = QPointF(self.width() / 2, self.height() / 2)
@@ -55,13 +109,28 @@ class EmoteWheel(QWidget):
 
     def set_emotes(self, emotes):
         self.emotes = list(emotes)
-        self._pixmaps = [_thumbnail(e) for e in self.emotes]
+        # 不足 MIN_SLOTS 时用 None 占位补足，占位槽不显示缩略图、不可选中
+        while len(self.emotes) < MIN_SLOTS:
+            self.emotes.append(None)
+        self._pixmaps = [_thumbnail(e) if e is not None else None for e in self.emotes]
         self._hover_index = -1
+        self._pointer = QPointF(0, 0)
         self.update()
+
+    def slot_count(self):
+        """返回实际槽位数量（含占位），供 overlay 计算高亮角度。"""
+        return len(self.emotes)
 
     def set_hover_index(self, idx):
         if idx != self._hover_index:
             self._hover_index = idx
+            self.update()
+
+    def set_pointer(self, dx, dy):
+        """STS2 风格：设置中心圆内指针的偏移（相对圆心，已限制在中心圆内）。"""
+        p = QPointF(dx, dy)
+        if p != self._pointer:
+            self._pointer = p
             self.update()
 
     def current_emote(self):
@@ -70,7 +139,17 @@ class EmoteWheel(QWidget):
             return self.emotes[self._hover_index]
         return None
 
+    def hover_index(self):
+        """当前高亮槽位索引；-1 表示鼠标停在中心（无方向）。"""
+        return self._hover_index
+
     def paintEvent(self, event):
+        if self.style == "sts2":
+            self._paint_sts2(event)
+        else:
+            self._paint_radial(event)
+
+    def _paint_radial(self, event):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         n = len(self.emotes)
@@ -78,6 +157,7 @@ class EmoteWheel(QWidget):
             p.end()
             return
 
+        pal = theme_palette(self.theme)
         angle_step = 360.0 / n
         outer = QRectF(
             self._center.x() - self.radius,
@@ -92,11 +172,11 @@ class EmoteWheel(QWidget):
             span = -angle_step  # 顺时针
 
             if i == self._hover_index:
-                p.setBrush(QBrush(QColor(90, 170, 255, 160)))
-                p.setPen(QPen(QColor(255, 255, 255, 220), 3))
+                p.setBrush(QBrush(pal["highlight"]))
+                p.setPen(QPen(pal["highlight_border"], 3))
             else:
-                p.setBrush(QBrush(QColor(20, 20, 20, 150)))
-                p.setPen(QPen(QColor(255, 255, 255, 90), 2))
+                p.setBrush(QBrush(pal["sector"]))
+                p.setPen(QPen(pal["sector_border"], 2))
 
             p.drawPie(outer, int(qt_start * 16), int(span * 16))
 
@@ -117,7 +197,79 @@ class EmoteWheel(QWidget):
 
         # 中心锚点（纯视觉，不作为死区）
         center_r = 16
-        p.setBrush(QBrush(QColor(15, 15, 15, 190)))
-        p.setPen(QPen(QColor(255, 255, 255, 70), 2))
+        p.setBrush(QBrush(pal["center"]))
+        p.setPen(QPen(pal["center_border"], 2))
         p.drawEllipse(self._center, center_r, center_r)
+        p.end()
+
+    def _paint_sts2(self, event):
+        p = QPainter(self)
+        p.setRenderHint(QPainter.Antialiasing)
+        n = len(self.emotes)
+        if n == 0:
+            p.end()
+            return
+
+        pal = theme_palette(self.theme)
+        outer_r = self.radius
+        inner_r = self.radius * 0.35   # 内圈半径：以内为透明中心区域
+        angle_step = 360.0 / n
+        base_shift = self.radius * 0.05   # 每个扇环沿径向平移，撕出平行缝隙
+        extra = self.radius * 0.05        # 高亮扇环额外突起
+
+        for i in range(n):
+            # gap=0：扇环紧贴，中心落在 i*angle_step（i=0 即正上方）
+            start_compass = i * angle_step - angle_step / 2
+            span = angle_step
+
+            highlighted = i == self._hover_index
+            d = base_shift + (extra if highlighted else 0.0)
+
+            # 构造无间隔扇环后，沿扇环中心径向平移 d；
+            # 相邻扇环平移方向不同，原共享径向边被撕成两条严格平行的缝
+            path = annular_sector(self._center, outer_r, inner_r, start_compass, span)
+            mid = math.radians(i * angle_step)
+            path.translate(d * math.sin(mid), -d * math.cos(mid))
+
+            if highlighted:
+                p.setBrush(QBrush(pal["highlight"]))
+                p.setPen(QPen(pal["highlight_border"], 3))
+            else:
+                p.setBrush(QBrush(pal["sector"]))
+                p.setPen(QPen(pal["sector_border"], 2))
+            p.drawPath(path)
+
+            # 缩略图放在扇环中间，跟着扇环一起平移
+            box = int(self.radius * 0.26)
+            dist = (outer_r + inner_r) / 2 + d
+            cx = self._center.x() + dist * math.sin(mid)
+            cy = self._center.y() - dist * math.cos(mid)
+            pm = self._pixmaps[i]
+            if pm is not None and not pm.isNull():
+                scaled = pm.scaled(box, box, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+                p.drawPixmap(
+                    int(cx - scaled.width() / 2),
+                    int(cy - scaled.height() / 2),
+                    scaled,
+                )
+
+        # 选择指针：箭头（中心区域透明，无背景圆）
+        pdx = self._pointer.x()
+        pdy = self._pointer.y()
+        dist = math.hypot(pdx, pdy)
+        if dist < 1e-3:
+            ux, uy = 0.0, -1.0
+        else:
+            ux, uy = pdx / dist, pdy / dist
+        vx, vy = -uy, ux
+        px = self._center.x() + pdx
+        py = self._center.y() + pdy
+        tip = QPointF(px + ux * 13, py + uy * 13)
+        base = QPointF(px - ux * 4, py - uy * 4)
+        left = QPointF(base.x() + vx * 6, base.y() + vy * 6)
+        right = QPointF(base.x() - vx * 6, base.y() - vy * 6)
+        arrow = QPolygonF([tip, left, right])
+        p.setBrush(QBrush(pal["pointer"]))
+        p.setPen(QPen(pal["pointer_border"], 1))
+        p.drawPolygon(arrow)
         p.end()

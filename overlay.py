@@ -1,5 +1,6 @@
 """全屏透明置顶 overlay：平时点击透传，按热键弹出表情滚轮，选中后弹出表情。"""
 import ctypes
+import math
 import random
 
 from PySide6.QtCore import Qt, QRect, QTimer
@@ -75,6 +76,8 @@ class Overlay(QWidget):
         self._wheel_center = None
         self._hover_timer = None
         self._last_emote = None
+        self._wheel_style = "radial"
+        self._cursor_hidden = False
 
         self._emote_display = EmoteDisplay(self)
         self._emote_display.setGeometry(self.rect())
@@ -141,6 +144,15 @@ class Overlay(QWidget):
             return
         _apply_click_through(int(self.winId()), False)
         self._wheel_center = QCursor.pos()
+        self._wheel_style = self._wheel_cfg.get("style", "radial")
+        if self._wheel_style == "sts2":
+            # 呼出时隐藏鼠标指针，改为中心圆内的自定义指针
+            QGuiApplication.setOverrideCursor(Qt.BlankCursor)
+            try:
+                ctypes.windll.user32.ShowCursor(False)
+            except Exception:
+                pass
+            self._cursor_hidden = True
         self._wheel = EmoteWheel(self, emotes, self._wheel_cfg)
         cursor = QCursor.pos()
         local = self.mapFromGlobal(cursor)
@@ -170,25 +182,39 @@ class Overlay(QWidget):
     def _update_hover(self):
         if not self._wheel_visible():
             return
-        emotes = self._current_emotes()
-        n = len(emotes)
+        n = self._wheel.slot_count()
         if n == 0:
             return
         cursor = QCursor.pos()
         dx = cursor.x() - self._wheel_center.x()
         dy = cursor.y() - self._wheel_center.y()
         self._wheel.set_hover_index(angle_index(dx, dy, n))
+        if self._wheel_style == "sts2":
+            # 把鼠标物理位置限制在中心透明区域内（内圈以内），避免指针移出轮盘后重新显示
+            pointer_r = self._wheel.radius * 0.22
+            dist = math.hypot(dx, dy)
+            if dist > pointer_r:
+                k = pointer_r / dist
+                dx *= k
+                dy *= k
+                QCursor.setPos(
+                    int(self._wheel_center.x() + dx),
+                    int(self._wheel_center.y() + dy),
+                )
+            self._wheel.set_pointer(dx, dy)
 
     def release_wheel(self):
         """松开呼出键：选中当前高亮的表情并关闭滚轮。
 
-        若松开时鼠标停在中心（无方向），则重复发送上一个表情，方便连续快速发送。
+        仅当鼠标停在中心（无方向）时重复发送上一个表情，方便连续快速发送；
+        指向空槽位（占位符）时不发送任何表情。
         """
         if not self._wheel_visible():
             return
         emote = self._wheel.current_emote()
-        if emote is None and self._last_emote is not None:
-            emote = self._last_emote
+        if emote is None:
+            if self._wheel.hover_index() < 0 and self._last_emote is not None:
+                emote = self._last_emote
         if emote is not None:
             self.show_emote(emote)
             self._last_emote = emote
@@ -202,6 +228,16 @@ class Overlay(QWidget):
             self._wheel.hide()
             self._wheel.deleteLater()
             self._wheel = None
+        if self._cursor_hidden:
+            # 先把（仍隐藏的）指针送回唤起位置，再恢复显示，避免闪烁
+            if self._wheel_center is not None:
+                QCursor.setPos(self._wheel_center)
+            try:
+                ctypes.windll.user32.ShowCursor(True)
+            except Exception:
+                pass
+            QGuiApplication.restoreOverrideCursor()
+            self._cursor_hidden = False
         _apply_click_through(int(self.winId()), True)
 
     def _wheel_visible(self):
@@ -219,30 +255,13 @@ class Overlay(QWidget):
 
     def _compute_emote_rect(self) -> QRect:
         size = int(self._display_cfg.get("size", 120))
-        margin = 40
-        w, h = self.width(), self.height()
-        pos = self._display_cfg.get("position", "cursor")
-        if pos == "cursor":
-            local = self.mapFromGlobal(QCursor.pos())
-            x = int(local.x() - size / 2)
-            y = int(local.y() - size / 2)
-        else:
-            x = y = 0
-            if pos == "center":
-                x, y = (w - size) // 2, (h - size) // 2
-            elif pos == "bottom-center":
-                x, y = (w - size) // 2, h - size - margin
-            elif pos == "top-center":
-                x, y = (w - size) // 2, margin
-            elif pos == "bottom-left":
-                x, y = margin, h - size - margin
-            elif pos == "bottom-right":
-                x, y = w - size - margin, h - size - margin
-            elif pos == "top-left":
-                x, y = margin, margin
-            elif pos == "top-right":
-                x, y = w - size - margin, margin
-        # 随机小偏移，避免连续发送的表情完全重叠（对所有位置生效）
+        # 表情出现在唤起滚轮时的位置上方，底部距该位置 offset_y 像素
+        offset_y = int(self._display_cfg.get("offset_y", 12))
+        anchor = self._wheel_center if self._wheel_center is not None else QCursor.pos()
+        local = self.mapFromGlobal(anchor)
+        x = int(local.x() - size / 2)
+        y = int(local.y() - size - offset_y)
+        # 随机小偏移，避免连续发送的表情完全重叠
         x += random.randint(-20, 20)
         y += random.randint(-20, 20)
         return QRect(x, y, size, size)

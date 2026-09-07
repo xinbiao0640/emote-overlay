@@ -10,38 +10,39 @@ DEFAULT_CONFIG = {
     "hotkey_dismiss": "esc",
     "groups": [],
     "display": {
-        "position": "cursor",
         "size": 120,
         "duration": 2.5,
         "fade": True,
         "monitor": 0,
+        "offset_y": 12,
     },
     "wheel": {
         "radius": 130,
+        "style": "radial",
+        "theme": "dark",
     },
 }
 
-# 显示位置允许的取值
-POSITIONS = [
-    "cursor",
-    "center",
-    "bottom-center",
-    "top-center",
-    "bottom-left",
-    "bottom-right",
-    "top-left",
-    "top-right",
+# 轮盘风格
+WHEEL_STYLES = [
+    "radial",
+    "sts2",
 ]
 
-POSITION_LABELS = {
-    "cursor": "跟随鼠标",
-    "center": "屏幕中心",
-    "bottom-center": "屏幕下方居中",
-    "top-center": "屏幕上方居中",
-    "bottom-left": "左下角",
-    "bottom-right": "右下角",
-    "top-left": "左上角",
-    "top-right": "右上角",
+WHEEL_STYLE_LABELS = {
+    "radial": "标准（鼠标自由移动）",
+    "sts2": "Slay the Spire 2（中心指针）",
+}
+
+# 轮盘主题
+WHEEL_THEMES = [
+    "dark",
+    "light",
+]
+
+WHEEL_THEME_LABELS = {
+    "dark": "暗色",
+    "light": "亮色",
 }
 
 
