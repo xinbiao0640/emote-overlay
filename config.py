@@ -21,6 +21,7 @@ DEFAULT_CONFIG = {
         "radius": 130,
         "style": "radial",
         "theme": "dark",
+        "shadow_alpha": 180,
     },
 }
 

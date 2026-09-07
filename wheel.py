@@ -50,6 +50,12 @@ def theme_palette(theme):
     }
 
 
+def shadow_shift(offset):
+    """阴影偏移向量：右下 45°（模拟左上光源），保持总偏移量 offset 不变。"""
+    k = math.sqrt(0.5)  # ≈0.707
+    return offset * k, offset * k
+
+
 def angle_index(dx, dy, n):
     """根据方向向量计算高亮的表情索引。
 
@@ -95,9 +101,18 @@ def annular_sector(center, outer_r, inner_r, start_compass, span, corner_r=0.0):
     a0 = math.radians(start_compass)
     a1 = math.radians(start_compass + span)
     span_rad = a1 - a0
-    # 圆角半径沿弧换算成角度偏移；clamp 保证每条弧至少保留一半长度
-    da_out = min(cr / outer_r, span_rad / 4.0)
-    da_in = min(cr / inner_r, span_rad / 4.0)
+    # 圆角圆心与两条边都相切（距离 = cr），据此反解角度偏移；
+    # clamp 到 span_rad/2 保证扇环很窄时外弧/内弧不反转
+    half = span_rad / 2.0
+    da_out = math.asin(min(1.0, cr / (outer_r - cr)))
+    da_in = math.asin(min(1.0, cr / (inner_r + cr)))
+    if da_out > half:
+        da_out = half
+    if da_in > half:
+        da_in = half
+    # 径向边上的切点半径：圆心沿径向边投影，须乘 cos(da)（直接用 r±cr 会偏离相切点）
+    r_out = (outer_r - cr) * math.cos(da_out)
+    r_in = (inner_r + cr) * math.cos(da_in)
 
     def pt(ang, rho):
         return QPointF(center.x() + rho * math.sin(ang),
@@ -124,15 +139,23 @@ def annular_sector(center, outer_r, inner_r, start_compass, span, corner_r=0.0):
     inner_rect = QRectF(center.x() - inner_r, center.y() - inner_r, inner_r * 2, inner_r * 2)
 
     path = QPainterPath()
+    # 外弧：a0+da_out → a1-da_out
     path.moveTo(pt(a0 + da_out, outer_r))
     _arc(pt(a0 + da_out, outer_r), outer_rect, -math.degrees(span_rad - 2 * da_out))
-    _fillet(pt(a1 - da_out, outer_r - cr), cr, pt(a1 - da_out, outer_r), pt(a1, outer_r - cr))
-    path.lineTo(pt(a1, inner_r + cr))
-    _fillet(pt(a1 - da_in, inner_r + cr), cr, pt(a1, inner_r + cr), pt(a1 - da_in, inner_r))
+    # 角 A（a1，外弧 → 径向边）
+    _fillet(pt(a1 - da_out, outer_r - cr), cr, pt(a1 - da_out, outer_r), pt(a1, r_out))
+    # 径向边（a1 处，r_out → r_in）
+    path.lineTo(pt(a1, r_in))
+    # 角 B（a1，径向边 → 内弧）
+    _fillet(pt(a1 - da_in, inner_r + cr), cr, pt(a1, r_in), pt(a1 - da_in, inner_r))
+    # 内弧：a1-da_in → a0+da_in（逆时针）
     _arc(pt(a1 - da_in, inner_r), inner_rect, math.degrees(span_rad - 2 * da_in))
-    _fillet(pt(a0 + da_in, inner_r + cr), cr, pt(a0 + da_in, inner_r), pt(a0, inner_r + cr))
-    path.lineTo(pt(a0, outer_r - cr))
-    _fillet(pt(a0 + da_out, outer_r - cr), cr, pt(a0, outer_r - cr), pt(a0 + da_out, outer_r))
+    # 角 C（a0，内弧 → 径向边）
+    _fillet(pt(a0 + da_in, inner_r + cr), cr, pt(a0 + da_in, inner_r), pt(a0, r_in))
+    # 径向边（a0 处，r_in → r_out）
+    path.lineTo(pt(a0, r_out))
+    # 角 D（a0，径向边 → 外弧）
+    _fillet(pt(a0 + da_out, outer_r - cr), cr, pt(a0, r_out), pt(a0 + da_out, outer_r))
     path.closeSubpath()
     return path
 
@@ -143,6 +166,7 @@ class EmoteWheel(QWidget):
         self.radius = int(wheel_cfg.get("radius", 130))
         self.style = wheel_cfg.get("style", "radial")
         self.theme = wheel_cfg.get("theme", "dark")
+        self._shadow_alpha = int(wheel_cfg.get("shadow_alpha", 180))
         self._hover_index = -1
         self._pointer = QPointF(0, 0)
 
@@ -224,10 +248,11 @@ class EmoteWheel(QWidget):
             qt_start = 90.0 - start_compass
             span = -angle_step  # 顺时针
 
-            # 阴影：向下偏移的深色半透明扇形，替代描边增加层次
-            p.setBrush(QBrush(pal["shadow"]))
+            # 阴影：右下斜向偏移的深色半透明扇形，替代描边增加层次
+            sx, sy = shadow_shift(shadow_offset)
+            p.setBrush(QBrush(QColor(0, 0, 0, self._shadow_alpha)))
             p.setPen(Qt.NoPen)
-            p.drawPie(outer.translated(0, shadow_offset),
+            p.drawPie(outer.translated(sx, sy),
                       int(qt_start * 16), int(span * 16))
 
             if i == self._hover_index:
@@ -287,10 +312,11 @@ class EmoteWheel(QWidget):
             ty = -d * math.cos(mid)
             path.translate(tx, ty)
 
-            # 阴影：向下偏移的深色半透明副本，替代描边增加层次
+            # 阴影：右下斜向偏移的深色半透明副本，替代描边增加层次
             shadow = QPainterPath(path)
-            shadow.translate(0, shadow_offset)
-            p.setBrush(QBrush(pal["shadow"]))
+            sx, sy = shadow_shift(shadow_offset)
+            shadow.translate(sx, sy)
+            p.setBrush(QBrush(QColor(0, 0, 0, self._shadow_alpha)))
             p.setPen(Qt.NoPen)
             p.drawPath(shadow)
 

@@ -22,12 +22,13 @@ from PySide6.QtWidgets import (
     QInputDialog,
     QMessageBox,
     QWidget,
+    QTabWidget,
 )
 
 from config import WHEEL_STYLES, WHEEL_STYLE_LABELS, WHEEL_THEMES, WHEEL_THEME_LABELS
 from emote_manager import import_emote
 from hotkey import KeyCaptureThread
-from wheel import angle_index, INNER_RATIO, theme_palette, annular_sector
+from wheel import angle_index, INNER_RATIO, theme_palette, annular_sector, shadow_shift
 
 
 def _thumb(emote):
@@ -63,6 +64,7 @@ class WheelPreview(QWidget):
         self._radius = 96
         self._style = "radial"
         self._theme = "dark"
+        self._shadow_alpha = 180
         self._drag_index = -1
         self._drag_pos = QPointF()
         self.setMinimumSize(240, 240)
@@ -73,6 +75,10 @@ class WheelPreview(QWidget):
 
     def set_theme(self, theme):
         self._theme = theme
+        self.update()
+
+    def set_shadow_alpha(self, alpha):
+        self._shadow_alpha = alpha
         self.update()
 
     def set_emotes(self, emotes):
@@ -188,14 +194,15 @@ class WheelPreview(QWidget):
                 path.translate(base_shift * math.sin(mid), -base_shift * math.cos(mid))
 
             if draw_shadow:
-                p.setBrush(QBrush(pal["shadow"]))
+                p.setBrush(QBrush(QColor(0, 0, 0, self._shadow_alpha)))
                 p.setPen(Qt.NoPen)
+                sx, sy = shadow_shift(shadow_offset)
                 if is_sts2:
                     sh = QPainterPath(path)
-                    sh.translate(0, shadow_offset)
+                    sh.translate(sx, sy)
                     p.drawPath(sh)
                 else:
-                    p.drawPie(outer.translated(0, shadow_offset),
+                    p.drawPie(outer.translated(sx, sy),
                               int(qt_start * 16), int(-span * 16))
 
             p.setBrush(QBrush(brush))
@@ -248,6 +255,7 @@ class SettingsDialog(QDialog):
     # ---- UI ----
     def _build_ui(self):
         root = QVBoxLayout(self)
+        tabs = QTabWidget()
 
         # 快捷键
         hotkey_box = QGroupBox("快捷键")
@@ -260,7 +268,7 @@ class SettingsDialog(QDialog):
         self._dismiss_key_btn.clicked.connect(lambda: self._start_capture("hotkey_dismiss"))
         hotkey_form.addRow("呼出滚轮", self._open_key_btn)
         hotkey_form.addRow("关闭 / 取消", self._dismiss_key_btn)
-        root.addWidget(hotkey_box)
+        tabs.addTab(hotkey_box, "快捷键")
 
         # 表情管理（分组 + 圆形预览）
         emote_box = QGroupBox("表情（PNG / GIF / WebP）")
@@ -299,7 +307,7 @@ class SettingsDialog(QDialog):
 
         self._preview.selectionChanged.connect(self._on_preview_select)
         self._preview.reordered.connect(self._on_reordered)
-        root.addWidget(emote_box)
+        tabs.addTab(emote_box, "表情")
 
         # 显示参数
         display_box = QGroupBox("显示")
@@ -324,7 +332,7 @@ class SettingsDialog(QDialog):
         display_form.addRow("显示时长", self._duration_spin)
         display_form.addRow("", self._fade_check)
         display_form.addRow("", self._return_cursor_check)
-        root.addWidget(display_box)
+        tabs.addTab(display_box, "显示")
 
         # 轮盘风格
         wheel_box = QGroupBox("轮盘")
@@ -345,7 +353,14 @@ class SettingsDialog(QDialog):
             self._theme_combo.addItem(WHEEL_THEME_LABELS.get(t, t), t)
         self._theme_combo.currentIndexChanged.connect(self._on_wheel_setting_changed)
         wheel_form.addRow("主题", self._theme_combo)
-        root.addWidget(wheel_box)
+
+        self._shadow_spin = QSpinBox()
+        self._shadow_spin.setRange(0, 255)
+        self._shadow_spin.valueChanged.connect(self._on_wheel_setting_changed)
+        wheel_form.addRow("阴影深浅", self._shadow_spin)
+        tabs.addTab(wheel_box, "轮盘")
+
+        root.addWidget(tabs)
 
         # 确认 / 取消
         buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel)
@@ -387,6 +402,7 @@ class SettingsDialog(QDialog):
         self._radius_spin.setValue(int(w.get("radius", 130)))
         idx = self._theme_combo.findData(w.get("theme", "dark"))
         self._theme_combo.setCurrentIndex(max(0, idx))
+        self._shadow_spin.setValue(int(w.get("shadow_alpha", 180)))
 
         self._selected_index = -1
         self._reload_preview()
@@ -395,10 +411,11 @@ class SettingsDialog(QDialog):
         self._config.setdefault("display", {})["monitor"] = self._monitor_combo.currentData()
 
     def _on_wheel_setting_changed(self):
-        # 风格 / 主题变化时即时刷新预览
+        # 风格 / 主题 / 阴影变化时即时刷新预览
         if hasattr(self, "_preview"):
             self._preview.set_style(self._style_combo.currentData())
             self._preview.set_theme(self._theme_combo.currentData())
+            self._preview.set_shadow_alpha(self._shadow_spin.value())
 
     # ---- 分组 ----
     def _current_group(self):
@@ -413,6 +430,7 @@ class SettingsDialog(QDialog):
         emotes = group.get("emotes", []) if group else []
         self._preview.set_style(self._style_combo.currentData())
         self._preview.set_theme(self._theme_combo.currentData())
+        self._preview.set_shadow_alpha(self._shadow_spin.value())
         self._preview.set_emotes(emotes)
         self._preview.set_selected(self._selected_index)
         self._update_emote_buttons()
@@ -554,6 +572,7 @@ class SettingsDialog(QDialog):
         wheel["style"] = self._style_combo.currentData()
         wheel["radius"] = self._radius_spin.value()
         wheel["theme"] = self._theme_combo.currentData()
+        wheel["shadow_alpha"] = self._shadow_spin.value()
 
     def _on_accept(self):
         if self._capture_thread is not None and self._capture_thread.isRunning():
