@@ -30,6 +30,8 @@ python main.py
 
 或者直接双击 `run.bat`（会自动创建虚拟环境并安装依赖）。
 
+> `run.bat` 会以**管理员权限**启动（UAC 弹窗点「是」）。全局热键 / 滚轮钩子需要管理员权限才能穿透 UIPI，否则无法捕获以管理员身份运行的其它程序（如某些游戏 / 启动器）的按键。
+
 > 首次运行 `emotes/` 目录为空，滚轮会没有表情。可以先在托盘菜单打开「设置」上传表情，或运行
 > `python scripts/gen_samples.py` 生成几个示例 emoji 表情用于测试。
 
@@ -47,9 +49,11 @@ python main.py
 1. 先运行本程序（overlay 是透明的，OBS 需要它保持运行）。
 2. 在 OBS 里添加来源 → **窗口采集（Window Capture）**。
 3. 「窗口」下拉选择本程序窗口（标题为 **Emote Overlay**）。
-4. **勾选「允许透明度（Allow transparency）」**。
-5. 采集方式选「**位图（BitBlt）**」（Windows Graphics Capture / WGC 不支持带 alpha 的透明窗口，会黑屏或无法显示）。
-6. 把该来源放在游戏/桌面画面来源的**上层**，即可透明叠加。
+4. 采集方式选「**Windows 10（1903 或更新版本）**」（即 Windows Graphics Capture / WGC，能正确带透明通道）。
+   - 不要选「**位图（BitBlt）**」，实测会**黑屏**。
+5. **勾选「允许透明度（Allow transparency）」**。
+6. **取消勾选「显示鼠标指针」**：overlay 已自行隐藏光标，勾选会额外采集到系统鼠标指针。
+7. 把该来源放在游戏/桌面画面来源的**上层**，即可透明叠加。
 
 > 如果窗口列表里找不到「Emote Overlay」，先点一下「窗口」下拉的刷新，或确认程序已在系统托盘运行中。
 
@@ -65,6 +69,7 @@ python main.py
 emote-overlay/
 ├── main.py             # 入口：overlay + 热键 + 托盘
 ├── overlay.py          # 透明置顶窗口、点击透传、滚轮/表情管理
+├── mousehook.py        # 全局鼠标滚轮钩子（切换表情分组）
 ├── hotkey.py           # 全局热键（keyboard 库）
 ├── wheel.py            # 径向表情滚轮
 ├── emote.py            # 表情弹出 + 动画

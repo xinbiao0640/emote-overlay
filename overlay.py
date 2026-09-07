@@ -3,13 +3,14 @@ import ctypes
 import math
 import random
 
-from PySide6.QtCore import Qt, QRect, QTimer
+from PySide6.QtCore import Qt, QRect, QTimer, Signal
 from PySide6.QtGui import QGuiApplication, QCursor
 from PySide6.QtWidgets import QWidget
 
 from wheel import EmoteWheel, angle_index
 from emote import EmoteDisplay
 from winutil import hide_taskbar_button
+from mousehook import WheelHook
 
 GWL_EXSTYLE = -20
 WS_EX_TRANSPARENT = 0x00000020
@@ -155,6 +156,8 @@ def _restore_system_cursors():
 
 
 class Overlay(QWidget):
+    _wheelScrolled = Signal(int)
+
     def __init__(self, config):
         super().__init__()
         self._groups = list(config.get("groups", []))
@@ -183,6 +186,7 @@ class Overlay(QWidget):
         self._last_emote = None
         self._wheel_style = "radial"
         self._cursor_hidden = False
+        self._wheel_open_flag = False
 
         self._emote_display = EmoteDisplay(self)
         self._emote_display.setGeometry(self.rect())
@@ -194,6 +198,11 @@ class Overlay(QWidget):
         _init_window_styles(int(self.winId()))
         # 隐藏任务栏按钮（等窗口注册后再删）
         QTimer.singleShot(0, lambda: hide_taskbar_button(int(self.winId())))
+
+        # 全局滚轮钩子：轮盘打开时吞掉滚轮并用它切换分组
+        self._wheelScrolled.connect(self._handle_wheel_scroll)
+        self._wheel_hook = WheelHook(self._on_wheel_hook)
+        self._wheel_hook.start()
 
     # ---- 配置 ----
     def set_groups(self, groups):
@@ -251,6 +260,16 @@ class Overlay(QWidget):
             self._wheel.set_emotes(self._current_emotes())
             self._wheel.set_hover_index(-1)
 
+    def _on_wheel_hook(self, delta):
+        """滚轮钩子回调（后台线程）：轮盘打开时转发并吞掉滚轮，避免游戏等其它窗口缩放。"""
+        if self._wheel_open_flag:
+            self._wheelScrolled.emit(delta)
+            return True
+        return False
+
+    def _handle_wheel_scroll(self, delta):
+        self._switch_group(delta)
+
     # ---- 滚轮 ----
     def open_wheel(self):
         if not self._groups:
@@ -261,6 +280,7 @@ class Overlay(QWidget):
             return
         emotes = self._current_emotes()
         _apply_click_through(int(self.winId()), False)
+        self._wheel_open_flag = True
         self._wheel_center = QCursor.pos()
         self._wheel_style = self._wheel_cfg.get("style", "radial")
         if self._wheel_style == "sts2":
@@ -351,6 +371,7 @@ class Overlay(QWidget):
             self.close_wheel()
 
     def close_wheel(self, return_cursor=False):
+        self._wheel_open_flag = False
         if self._hover_timer is not None:
             self._hover_timer.stop()
             self._hover_timer = None
