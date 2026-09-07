@@ -30,11 +30,11 @@ def main():
     # 3. 滚轮角度判定（只看方向角度，不限制距离，无中心死区）
     n = 6
     assert angle_index(0, -100, n) == 0      # 正上方
-    assert angle_index(100, 0, n) == 1       # 正右方
+    assert angle_index(100, 0, n) == 2       # 正右方（落在扇区 1/2 分界，顺时针归入扇区 2）
     assert angle_index(0, 100, n) == 3       # 正下方
     assert angle_index(0, 0, n) == -1        # 恰好中心点
     assert angle_index(0, -9999, n) == 0     # 很远仍按方向选中
-    assert angle_index(1, -1, n) == 0        # 极靠近中心也选中（无死区）
+    assert angle_index(1, -1, n) == 1        # 极靠近中心也选中（无死区），右上 45° 归入扇区 1
     print("滚轮角度判定 OK")
 
     # 4. overlay / emote 模块可导入并构造

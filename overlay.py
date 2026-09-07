@@ -51,8 +51,8 @@ def _apply_click_through(hwnd: int, enabled: bool):
 
 
 def _hide_cursor():
-    """把系统光标计数压到负数以确保隐藏；多压一层以抵抗一次外部 ShowCursor(True)。"""
-    while ctypes.windll.user32.ShowCursor(False) >= 0:
+    """把系统光标计数压到 -2 以确保隐藏；多压一层以抵抗一次外部 ShowCursor(True)。"""
+    while ctypes.windll.user32.ShowCursor(False) >= -1:
         pass
 
 
@@ -67,6 +67,30 @@ class _RECT(ctypes.Structure):
                 ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
 
 
+class _POINT(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+class _CURSORINFO(ctypes.Structure):
+    _fields_ = [("cbSize", ctypes.c_uint), ("flags", ctypes.c_uint),
+                ("hCursor", ctypes.c_void_p), ("ptScreenPos", _POINT)]
+
+
+def _physical_cursor_pos():
+    """返回物理像素坐标下的系统光标位置，与 ClipCursor 同一坐标系（多屏不同 DPI 也能对齐）。"""
+    pt = _POINT()
+    ctypes.windll.user32.GetCursorPos(ctypes.byref(pt))
+    return pt.x, pt.y
+
+
+def _cursor_visible():
+    """系统光标当前是否可见（GetCursorInfo 的 CURSOR_SHOWING 标志）。"""
+    ci = _CURSORINFO()
+    ci.cbSize = ctypes.sizeof(_CURSORINFO)
+    ctypes.windll.user32.GetCursorInfo(ctypes.byref(ci))
+    return bool(ci.flags & 0x00000001)
+
+
 def _clip_cursor(rect):
     """把系统光标限制在 rect 内（物理像素坐标）；传 None 解除限制。
 
@@ -79,6 +103,55 @@ def _clip_cursor(rect):
         return
     r = _RECT(int(rect.left()), int(rect.top()), int(rect.right()), int(rect.bottom()))
     user32.ClipCursor(ctypes.byref(r))
+
+
+# 标准系统光标槽位（OCR_*），全部替换成透明光标才能跨窗口彻底隐藏
+_OCR_CURSORS = [
+    32512,  # OCR_NORMAL
+    32513,  # OCR_IBEAM
+    32514,  # OCR_WAIT
+    32515,  # OCR_CROSS
+    32516,  # OCR_UP
+    32640,  # OCR_SIZE
+    32641,  # OCR_ICON
+    32642,  # OCR_SIZENWSE
+    32643,  # OCR_SIZENESW
+    32644,  # OCR_SIZEWE
+    32645,  # OCR_SIZENS
+    32646,  # OCR_SIZEALL
+    32648,  # OCR_NO
+    32649,  # OCR_HAND
+    32650,  # OCR_APPSTARTING
+]
+
+
+def _blank_system_cursors():
+    """把系统标准光标全部替换为透明光标，实现跨窗口（微信/视频等其它应用）全局隐藏。
+
+    ShowCursor 的隐藏按线程生效，只对本窗口上方生效；透明 overlay 的镂空处命中测试
+    会穿透到下层窗口，导致其线程把光标显示出来。因此改用 SetSystemCursor 全局替换。
+    """
+    user32 = ctypes.windll.user32
+    kernel32 = ctypes.windll.kernel32
+    kernel32.GetModuleHandleW.restype = ctypes.c_void_p
+    user32.CreateCursor.argtypes = [
+        ctypes.c_void_p, ctypes.c_int, ctypes.c_int,
+        ctypes.c_int, ctypes.c_int, ctypes.c_void_p, ctypes.c_void_p,
+    ]
+    user32.CreateCursor.restype = ctypes.c_void_p
+    hinst = kernel32.GetModuleHandleW(None)
+    # 1x1 单色光标：AND=1（透明）、XOR=0（不画）。每行按 16 位对齐，各占 2 字节。
+    and_mask = ctypes.create_string_buffer(b"\xff\xff")
+    xor_mask = ctypes.create_string_buffer(b"\x00\x00")
+    for ocr in _OCR_CURSORS:
+        hcur = user32.CreateCursor(hinst, 0, 0, 1, 1, and_mask, xor_mask)
+        if hcur:
+            user32.SetSystemCursor(hcur, ocr)
+
+
+def _restore_system_cursors():
+    """SPI_SETCURSORS(0x0057)：从注册表重载系统光标，恢复被替换的默认光标。"""
+    ctypes.windll.user32.SystemParametersInfoW(0x0057, 0, None, 0)
 
 
 class Overlay(QWidget):
@@ -195,16 +268,16 @@ class Overlay(QWidget):
             QGuiApplication.setOverrideCursor(Qt.BlankCursor)
             self.setCursor(Qt.BlankCursor)
             _hide_cursor()
+            _blank_system_cursors()
             self._cursor_hidden = True
             # 限制物理光标在一个小范围内，避免漂移导致光标重新出现。
-            # ClipCursor 用物理像素坐标，需按当前屏幕 DPI 缩放（否则高 DPI 下会偏移）。
-            r = 40
+            # 直接用 GetCursorPos 拿物理像素坐标，多屏 DPI 不一致时也不会把光标错误地
+            # 移动到别处（之前用 QCursor.pos()*dpr 换算，在屏幕二会算错导致轮盘错位）。
+            px, py = _physical_cursor_pos()
             screen = QGuiApplication.screenAt(self._wheel_center)
             dpr = screen.devicePixelRatio() if screen else 1.0
-            cx = self._wheel_center.x() * dpr
-            cy = self._wheel_center.y() * dpr
-            rr = r * dpr
-            _clip_cursor(QRect(int(cx - rr), int(cy - rr), int(rr * 2), int(rr * 2)))
+            rr = int(40 * dpr)
+            _clip_cursor(QRect(int(px - rr), int(py - rr), int(rr * 2), int(rr * 2)))
         self._wheel = EmoteWheel(self, emotes, self._wheel_cfg)
         cursor = QCursor.pos()
         local = self.mapFromGlobal(cursor)
@@ -237,6 +310,11 @@ class Overlay(QWidget):
         n = self._wheel.slot_count()
         if n == 0:
             return
+        if self._wheel_style == "sts2" and self._cursor_hidden:
+            # 光标被 ClipCursor 限制在边缘时，系统可能短暂重新显示它；
+            # 这里轮询检测，一旦可见立即再隐藏，避免边缘处光标闪现。
+            if _cursor_visible():
+                _hide_cursor()
         cursor = QCursor.pos()
         dx = cursor.x() - self._wheel_center.x()
         dy = cursor.y() - self._wheel_center.y()
@@ -285,6 +363,7 @@ class Overlay(QWidget):
             self.unsetCursor()
             QGuiApplication.restoreOverrideCursor()
             _show_cursor()
+            _restore_system_cursors()
             self._cursor_hidden = False
             _clip_cursor(None)
         if return_cursor and self._wheel_center is not None:

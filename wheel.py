@@ -31,17 +31,19 @@ def theme_palette(theme):
         return {
             "sector": QColor(235, 235, 235, 190),
             "sector_border": QColor(120, 120, 120, 170),
-            "highlight": QColor(232, 240, 255, 252),
+            "highlight": QColor(244, 245, 249, 252),
+            "shadow": QColor(0, 0, 0, 45),
             "center": QColor(250, 250, 250, 230),
             "center_border": QColor(120, 120, 120, 140),
             "pointer": QColor(35, 35, 35, 235),
             "pointer_border": QColor(255, 255, 255, 210),
         }
     return {
-        "sector": QColor(20, 20, 20, 170),
+        "sector": QColor(52, 54, 60, 190),
         "sector_border": QColor(255, 255, 255, 90),
-        "highlight": QColor(30, 40, 64, 250),
-        "center": QColor(15, 15, 15, 190),
+        "highlight": QColor(88, 94, 110, 250),
+        "shadow": QColor(0, 0, 0, 80),
+        "center": QColor(40, 42, 48, 210),
         "center_border": QColor(255, 255, 255, 70),
         "pointer": QColor(255, 255, 255, 230),
         "pointer_border": QColor(0, 0, 0, 120),
@@ -66,25 +68,71 @@ def angle_index(dx, dy, n):
     return int(theta // step) % n
 
 
-def annular_sector(center, outer_r, inner_r, start_compass, span):
+def annular_sector(center, outer_r, inner_r, start_compass, span, corner_r=0.0):
     """构造扇环路径：外弧 + 两条径向边 + 内弧，中心（内圈以内）留空透明。
 
     start_compass 为罗盘角（0°=12点，顺时针），span 为顺时针跨度（度）。
+    corner_r>0 时在四个角各做一个与两侧边相切的圆角（真正的倒角，而非顶点画圆）。
     """
-    start = math.radians(start_compass)
-    p1 = QPointF(center.x() + outer_r * math.sin(start),
-                 center.y() - outer_r * math.cos(start))
-    outer_rect = QRectF(center.x() - outer_r, center.y() - outer_r,
-                        outer_r * 2, outer_r * 2)
-    inner_rect = QRectF(center.x() - inner_r, center.y() - inner_r,
-                        inner_r * 2, inner_r * 2)
-    qt_start = 90.0 - start_compass
-    qt_end = 90.0 - (start_compass + span)
+    if corner_r <= 0:
+        start = math.radians(start_compass)
+        p1 = QPointF(center.x() + outer_r * math.sin(start),
+                     center.y() - outer_r * math.cos(start))
+        outer_rect = QRectF(center.x() - outer_r, center.y() - outer_r,
+                            outer_r * 2, outer_r * 2)
+        inner_rect = QRectF(center.x() - inner_r, center.y() - inner_r,
+                            inner_r * 2, inner_r * 2)
+        qt_start = 90.0 - start_compass
+        qt_end = 90.0 - (start_compass + span)
+        path = QPainterPath()
+        path.moveTo(p1)
+        path.arcTo(outer_rect, qt_start, -span)   # 外弧（顺时针）
+        path.arcTo(inner_rect, qt_end, span)      # 内弧（逆时针，回起点）
+        path.closeSubpath()
+        return path
+
+    cr = corner_r
+    a0 = math.radians(start_compass)
+    a1 = math.radians(start_compass + span)
+    span_rad = a1 - a0
+    # 圆角半径沿弧换算成角度偏移；clamp 保证每条弧至少保留一半长度
+    da_out = min(cr / outer_r, span_rad / 4.0)
+    da_in = min(cr / inner_r, span_rad / 4.0)
+
+    def pt(ang, rho):
+        return QPointF(center.x() + rho * math.sin(ang),
+                       center.y() - rho * math.cos(ang))
+
+    def _arc(p_from, rect, sweep_deg):
+        # Qt 弧角度 0°=3点钟、逆时针为正、y 向下，故用 (center.y - p.y) 求角
+        start_deg = math.degrees(math.atan2(rect.center().y() - p_from.y(),
+                                            p_from.x() - rect.center().x()))
+        path.arcTo(rect, start_deg, sweep_deg)
+
+    def _fillet(f, c, p_from, p_to):
+        rect = QRectF(f.x() - c, f.y() - c, c * 2, c * 2)
+        a_from = math.degrees(math.atan2(f.y() - p_from.y(), p_from.x() - f.x()))
+        a_to = math.degrees(math.atan2(f.y() - p_to.y(), p_to.x() - f.x()))
+        sweep = a_to - a_from
+        while sweep > 180.0:
+            sweep -= 360.0
+        while sweep < -180.0:
+            sweep += 360.0
+        path.arcTo(rect, a_from, sweep)
+
+    outer_rect = QRectF(center.x() - outer_r, center.y() - outer_r, outer_r * 2, outer_r * 2)
+    inner_rect = QRectF(center.x() - inner_r, center.y() - inner_r, inner_r * 2, inner_r * 2)
 
     path = QPainterPath()
-    path.moveTo(p1)
-    path.arcTo(outer_rect, qt_start, -span)   # 外弧（顺时针）
-    path.arcTo(inner_rect, qt_end, span)      # 内弧（逆时针，回起点）
+    path.moveTo(pt(a0 + da_out, outer_r))
+    _arc(pt(a0 + da_out, outer_r), outer_rect, -math.degrees(span_rad - 2 * da_out))
+    _fillet(pt(a1 - da_out, outer_r - cr), cr, pt(a1 - da_out, outer_r), pt(a1, outer_r - cr))
+    path.lineTo(pt(a1, inner_r + cr))
+    _fillet(pt(a1 - da_in, inner_r + cr), cr, pt(a1, inner_r + cr), pt(a1 - da_in, inner_r))
+    _arc(pt(a1 - da_in, inner_r), inner_rect, math.degrees(span_rad - 2 * da_in))
+    _fillet(pt(a0 + da_in, inner_r + cr), cr, pt(a0 + da_in, inner_r), pt(a0, inner_r + cr))
+    path.lineTo(pt(a0, outer_r - cr))
+    _fillet(pt(a0 + da_out, outer_r - cr), cr, pt(a0, outer_r - cr), pt(a0 + da_out, outer_r))
     path.closeSubpath()
     return path
 
@@ -168,6 +216,7 @@ class EmoteWheel(QWidget):
             self.radius * 2,
             self.radius * 2,
         )
+        shadow_offset = max(3.0, self.radius * 0.035)
 
         for i in range(n):
             # 扇区中心落在 i*angle_step，0 号在正上方
@@ -175,13 +224,17 @@ class EmoteWheel(QWidget):
             qt_start = 90.0 - start_compass
             span = -angle_step  # 顺时针
 
+            # 阴影：向下偏移的深色半透明扇形，替代描边增加层次
+            p.setBrush(QBrush(pal["shadow"]))
+            p.setPen(Qt.NoPen)
+            p.drawPie(outer.translated(0, shadow_offset),
+                      int(qt_start * 16), int(span * 16))
+
             if i == self._hover_index:
                 p.setBrush(QBrush(pal["highlight"]))
-                p.setPen(Qt.NoPen)
             else:
                 p.setBrush(QBrush(pal["sector"]))
-                p.setPen(QPen(pal["sector_border"], 2))
-
+            p.setPen(Qt.NoPen)
             p.drawPie(outer, int(qt_start * 16), int(span * 16))
 
             # 在扇区中间放缩略图
@@ -215,6 +268,8 @@ class EmoteWheel(QWidget):
         angle_step = 360.0 / n
         base_shift = self.radius * 0.05   # 每个扇环沿径向平移，撕出平行缝隙
         extra = self.radius * 0.10        # 高亮扇环额外突起
+        corner_r = max(2.0, self.radius * 0.05)   # 扇环四角圆角半径
+        shadow_offset = max(3.0, self.radius * 0.035)
 
         for i in range(n):
             # gap=0：扇环紧贴，中心落在 i*angle_step（i=0 即正上方）
@@ -226,16 +281,22 @@ class EmoteWheel(QWidget):
 
             # 构造无间隔扇环后，沿扇环中心径向平移 d；
             # 相邻扇环平移方向不同，原共享径向边被撕成两条严格平行的缝
-            path = annular_sector(self._center, outer_r, inner_r, start_compass, span)
+            path = annular_sector(self._center, outer_r, inner_r, start_compass, span, corner_r)
             mid = math.radians(i * angle_step)
-            path.translate(d * math.sin(mid), -d * math.cos(mid))
+            tx = d * math.sin(mid)
+            ty = -d * math.cos(mid)
+            path.translate(tx, ty)
 
-            if highlighted:
-                p.setBrush(QBrush(pal["highlight"]))
-                p.setPen(Qt.NoPen)
-            else:
-                p.setBrush(QBrush(pal["sector"]))
-                p.setPen(QPen(pal["sector_border"], 2))
+            # 阴影：向下偏移的深色半透明副本，替代描边增加层次
+            shadow = QPainterPath(path)
+            shadow.translate(0, shadow_offset)
+            p.setBrush(QBrush(pal["shadow"]))
+            p.setPen(Qt.NoPen)
+            p.drawPath(shadow)
+
+            fill = pal["highlight"] if highlighted else pal["sector"]
+            p.setBrush(QBrush(fill))
+            p.setPen(Qt.NoPen)
             p.drawPath(path)
 
             # 缩略图放在扇环中间，跟着扇环一起平移；高亮时放大更突出

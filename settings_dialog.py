@@ -4,7 +4,7 @@ import math
 import os
 
 from PySide6.QtCore import Qt, QSize, QRectF, QPointF, Signal
-from PySide6.QtGui import QPixmap, QMovie, QPainter, QColor, QPen, QBrush, QGuiApplication
+from PySide6.QtGui import QPixmap, QMovie, QPainter, QColor, QPen, QBrush, QGuiApplication, QPainterPath
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -149,6 +149,8 @@ class WheelPreview(QWidget):
         base_shift = outer_r * 0.05
 
         hover_idx = self._index_at(self._drag_pos) if self._drag_index >= 0 else -1
+        corner_r = max(2.0, outer_r * 0.05)
+        shadow_offset = max(3.0, outer_r * 0.035)
 
         for i in range(n):
             # 两种风格统一：扇环中心落在 i*angle_step，0 号在正上方
@@ -157,30 +159,48 @@ class WheelPreview(QWidget):
             qt_start = 90.0 - start_compass
             outer = QRectF(center.x() - outer_r, center.y() - outer_r,
                            outer_r * 2, outer_r * 2)
+            mid = math.radians(i * angle_step)
 
             is_empty = not self._slots[i].get("file")
             if i == self._drag_index:
                 brush = QColor(0, 0, 0, 90) if self._theme == "dark" else QColor(0, 0, 0, 45)
                 pen = QPen(pal["sector_border"], 2)
+                draw_shadow = False
             elif i == hover_idx:
-                brush = QColor(150, 185, 255, 150)
-                pen = QPen(QColor(255, 255, 255, 200), 3)
+                brush = QColor(185, 192, 205, 150)
+                pen = Qt.NoPen
+                draw_shadow = True
             elif i == self._selected:
                 brush = pal["highlight"]
                 pen = Qt.NoPen
+                draw_shadow = True
             elif is_empty:
                 brush = QColor(0, 0, 0, 30) if self._theme == "dark" else QColor(0, 0, 0, 18)
                 pen = QPen(pal["sector_border"], 1, Qt.DashLine)
+                draw_shadow = False
             else:
                 brush = pal["sector"]
-                pen = QPen(pal["sector_border"], 2)
+                pen = Qt.NoPen
+                draw_shadow = True
+
+            if is_sts2:
+                path = annular_sector(center, outer_r, inner_r, start_compass, span, corner_r)
+                path.translate(base_shift * math.sin(mid), -base_shift * math.cos(mid))
+
+            if draw_shadow:
+                p.setBrush(QBrush(pal["shadow"]))
+                p.setPen(Qt.NoPen)
+                if is_sts2:
+                    sh = QPainterPath(path)
+                    sh.translate(0, shadow_offset)
+                    p.drawPath(sh)
+                else:
+                    p.drawPie(outer.translated(0, shadow_offset),
+                              int(qt_start * 16), int(-span * 16))
 
             p.setBrush(QBrush(brush))
             p.setPen(pen)
             if is_sts2:
-                path = annular_sector(center, outer_r, inner_r, start_compass, span)
-                sector_mid = math.radians(i * angle_step)
-                path.translate(base_shift * math.sin(sector_mid), -base_shift * math.cos(sector_mid))
                 p.drawPath(path)
             else:
                 p.drawPie(outer, int(qt_start * 16), int(-span * 16))
