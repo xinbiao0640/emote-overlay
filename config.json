@@ -71,10 +71,11 @@
     "fade": true,
     "monitor": 1,
     "offset_y": 12,
+    "return_cursor": true,
     "position": "cursor"
   },
   "wheel": {
-    "radius": 130,
+    "radius": 150,
     "style": "sts2",
     "theme": "light"
   }

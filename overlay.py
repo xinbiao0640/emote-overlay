@@ -62,6 +62,25 @@ def _show_cursor():
         pass
 
 
+class _RECT(ctypes.Structure):
+    _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+
+def _clip_cursor(rect):
+    """把系统光标限制在 rect 内（屏幕坐标）；传 None 解除限制。
+
+    ClipCursor 只限制移动范围、不会像 SetCursorPos 那样重新显示光标，
+    因此可与 ShowCursor(False) 配合实现「彻底隐藏且不漂移」。
+    """
+    user32 = ctypes.windll.user32
+    if rect is None:
+        user32.ClipCursor(None)
+        return
+    r = _RECT(int(rect.left()), int(rect.top()), int(rect.right()), int(rect.bottom()))
+    user32.ClipCursor(ctypes.byref(r))
+
+
 class Overlay(QWidget):
     def __init__(self, config):
         super().__init__()
@@ -177,6 +196,10 @@ class Overlay(QWidget):
             self.setCursor(Qt.BlankCursor)
             _hide_cursor()
             self._cursor_hidden = True
+            # 限制物理光标在一个小范围内，避免漂移导致光标重新出现
+            r = 40
+            self._clip_cursor(QRect(
+                self._wheel_center.x() - r, self._wheel_center.y() - r, r * 2, r * 2))
         self._wheel = EmoteWheel(self, emotes, self._wheel_cfg)
         cursor = QCursor.pos()
         local = self.mapFromGlobal(cursor)
@@ -258,6 +281,7 @@ class Overlay(QWidget):
             QGuiApplication.restoreOverrideCursor()
             _show_cursor()
             self._cursor_hidden = False
+            _clip_cursor(None)
         if return_cursor and self._wheel_center is not None:
             # 选择后将物理光标移回呼出位置（此刻光标已恢复可见，不会闪烁）
             QCursor.setPos(self._wheel_center)

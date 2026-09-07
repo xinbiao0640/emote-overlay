@@ -163,7 +163,7 @@ class WheelPreview(QWidget):
                 brush = QColor(0, 0, 0, 90) if self._theme == "dark" else QColor(0, 0, 0, 45)
                 pen = QPen(pal["sector_border"], 2)
             elif i == hover_idx:
-                brush = QColor(255, 176, 32, 140)
+                brush = QColor(150, 185, 255, 150)
                 pen = QPen(QColor(255, 255, 255, 200), 3)
             elif i == self._selected:
                 brush = pal["highlight"]
