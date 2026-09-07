@@ -15,6 +15,7 @@ DEFAULT_CONFIG = {
         "fade": True,
         "monitor": 0,
         "offset_y": 12,
+        "return_cursor": True,
     },
     "wheel": {
         "radius": 130,

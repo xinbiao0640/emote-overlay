@@ -31,8 +31,8 @@ def theme_palette(theme):
         return {
             "sector": QColor(235, 235, 235, 190),
             "sector_border": QColor(120, 120, 120, 170),
-            "highlight": QColor(90, 170, 255, 210),
-            "highlight_border": QColor(255, 255, 255, 240),
+            "highlight": QColor(255, 176, 32, 245),
+            "highlight_border": QColor(255, 255, 255, 255),
             "center": QColor(250, 250, 250, 230),
             "center_border": QColor(120, 120, 120, 140),
             "pointer": QColor(35, 35, 35, 235),
@@ -41,8 +41,8 @@ def theme_palette(theme):
     return {
         "sector": QColor(20, 20, 20, 170),
         "sector_border": QColor(255, 255, 255, 90),
-        "highlight": QColor(90, 170, 255, 200),
-        "highlight_border": QColor(255, 255, 255, 220),
+        "highlight": QColor(255, 184, 48, 245),
+        "highlight_border": QColor(255, 255, 255, 255),
         "center": QColor(15, 15, 15, 190),
         "center_border": QColor(255, 255, 255, 70),
         "pointer": QColor(255, 255, 255, 230),
@@ -50,14 +50,13 @@ def theme_palette(theme):
     }
 
 
-def angle_index(dx, dy, n, centered=False):
+def angle_index(dx, dy, n):
     """根据方向向量计算高亮的表情索引。
 
     只看方向角度、不限制距离，无中心死区：只要不是恰好在中心点，
     移动多远都能选中对应方向的表情。中心点返回 -1（无选中）。
 
-    centered=False：扇区边界落在 i*step（radial 布局）。
-    centered=True：扇区中心落在 i*step（sts2 布局，正上方是 0 号扇区中心）。
+    扇区中心落在 i*step，0 号扇区中心在正上方（12 点方向）。
     """
     if n == 0 or (dx == 0 and dy == 0):
         return -1
@@ -65,8 +64,7 @@ def angle_index(dx, dy, n, centered=False):
     if theta < 0:
         theta += 360.0
     step = 360.0 / n
-    if centered:
-        theta += step / 2
+    theta += step / 2
     return int(theta // step) % n
 
 
@@ -174,7 +172,8 @@ class EmoteWheel(QWidget):
         )
 
         for i in range(n):
-            start_compass = i * angle_step
+            # 扇区中心落在 i*angle_step，0 号在正上方
+            start_compass = i * angle_step - angle_step / 2
             qt_start = 90.0 - start_compass
             span = -angle_step  # 顺时针
 
@@ -188,7 +187,7 @@ class EmoteWheel(QWidget):
             p.drawPie(outer, int(qt_start * 16), int(span * 16))
 
             # 在扇区中间放缩略图
-            mid = math.radians(start_compass + angle_step / 2)
+            mid = math.radians(i * angle_step)
             dist = self.radius * 0.6
             cx = self._center.x() + dist * math.sin(mid)
             cy = self._center.y() - dist * math.cos(mid)
@@ -217,7 +216,7 @@ class EmoteWheel(QWidget):
         inner_r = self.radius * INNER_RATIO   # 内圈半径：以内为透明中心区域
         angle_step = 360.0 / n
         base_shift = self.radius * 0.05   # 每个扇环沿径向平移，撕出平行缝隙
-        extra = self.radius * 0.05        # 高亮扇环额外突起
+        extra = self.radius * 0.10        # 高亮扇环额外突起
 
         for i in range(n):
             # gap=0：扇环紧贴，中心落在 i*angle_step（i=0 即正上方）
@@ -235,14 +234,14 @@ class EmoteWheel(QWidget):
 
             if highlighted:
                 p.setBrush(QBrush(pal["highlight"]))
-                p.setPen(QPen(pal["highlight_border"], 3))
+                p.setPen(QPen(pal["highlight_border"], 4))
             else:
                 p.setBrush(QBrush(pal["sector"]))
                 p.setPen(QPen(pal["sector_border"], 2))
             p.drawPath(path)
 
-            # 缩略图放在扇环中间，跟着扇环一起平移
-            box = int(self.radius * 0.26)
+            # 缩略图放在扇环中间，跟着扇环一起平移；高亮时放大更突出
+            box = int(self.radius * (0.34 if highlighted else 0.26))
             dist = (outer_r + inner_r) / 2 + d
             cx = self._center.x() + dist * math.sin(mid)
             cy = self._center.y() - dist * math.cos(mid)

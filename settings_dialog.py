@@ -94,7 +94,7 @@ class WheelPreview(QWidget):
             return -1
         dx = pos.x() - self.width() / 2
         dy = pos.y() - self.height() / 2
-        return angle_index(dx, dy, len(self._slots), centered=(self._style == "sts2"))
+        return angle_index(dx, dy, len(self._slots))
 
     def mousePressEvent(self, event):
         if not self._slots:
@@ -151,13 +151,9 @@ class WheelPreview(QWidget):
         hover_idx = self._index_at(self._drag_pos) if self._drag_index >= 0 else -1
 
         for i in range(n):
-            if is_sts2:
-                # gap=0：扇环紧贴，中心落在 i*angle_step（i=0 即正上方）
-                start_compass = i * angle_step - angle_step / 2
-                span = angle_step
-            else:
-                start_compass = i * angle_step
-                span = angle_step
+            # 两种风格统一：扇环中心落在 i*angle_step，0 号在正上方
+            start_compass = i * angle_step - angle_step / 2
+            span = angle_step
             qt_start = 90.0 - start_compass
             outer = QRectF(center.x() - outer_r, center.y() - outer_r,
                            outer_r * 2, outer_r * 2)
@@ -167,8 +163,8 @@ class WheelPreview(QWidget):
                 brush = QColor(0, 0, 0, 90) if self._theme == "dark" else QColor(0, 0, 0, 45)
                 pen = QPen(pal["sector_border"], 2)
             elif i == hover_idx:
-                brush = QColor(90, 170, 255, 120)
-                pen = QPen(QColor(255, 255, 255, 180), 3)
+                brush = QColor(255, 176, 32, 140)
+                pen = QPen(QColor(255, 255, 255, 200), 3)
             elif i == self._selected:
                 brush = pal["highlight"]
                 pen = QPen(pal["highlight_border"], 3)
@@ -192,7 +188,7 @@ class WheelPreview(QWidget):
             if i == self._drag_index or is_empty:
                 continue  # 被拖拽的表情画在鼠标处；空表情槽无缩略图
 
-            mid = math.radians(i * angle_step) if is_sts2 else math.radians(start_compass + span / 2)
+            mid = math.radians(i * angle_step)
             dist = (outer_r + inner_r) / 2 + base_shift if is_sts2 else outer_r * 0.62
             cx = center.x() + dist * math.sin(mid)
             cy = center.y() - dist * math.cos(mid)
@@ -301,11 +297,13 @@ class SettingsDialog(QDialog):
         self._duration_spin.setSingleStep(0.1)
         self._duration_spin.setSuffix(" 秒")
         self._fade_check = QCheckBox("淡入淡出")
+        self._return_cursor_check = QCheckBox("选择后鼠标回到原处")
         display_form.addRow("显示器", self._monitor_combo)
         display_form.addRow("表情大小", self._size_spin)
         display_form.addRow("上方偏移", self._offset_spin)
         display_form.addRow("显示时长", self._duration_spin)
         display_form.addRow("", self._fade_check)
+        display_form.addRow("", self._return_cursor_check)
         root.addWidget(display_box)
 
         # 轮盘风格
@@ -361,6 +359,7 @@ class SettingsDialog(QDialog):
         self._offset_spin.setValue(int(d.get("offset_y", 12)))
         self._duration_spin.setValue(float(d.get("duration", 2.5)))
         self._fade_check.setChecked(bool(d.get("fade", True)))
+        self._return_cursor_check.setChecked(bool(d.get("return_cursor", True)))
 
         w = self._config.get("wheel", {})
         idx = self._style_combo.findData(w.get("style", "radial"))
@@ -529,6 +528,7 @@ class SettingsDialog(QDialog):
         d["offset_y"] = self._offset_spin.value()
         d["duration"] = self._duration_spin.value()
         d["fade"] = self._fade_check.isChecked()
+        d["return_cursor"] = self._return_cursor_check.isChecked()
 
         wheel = self._config.setdefault("wheel", {})
         wheel["style"] = self._style_combo.currentData()

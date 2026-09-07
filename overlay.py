@@ -69,6 +69,7 @@ class Overlay(QWidget):
         self._group_index = 0
         self._display_cfg = dict(config.get("display", {}))
         self._wheel_cfg = dict(config.get("wheel", {}))
+        self._return_cursor = bool(self._display_cfg.get("return_cursor", True))
 
         # 注意：不能用 Qt.Tool，否则会加 WS_EX_TOOLWINDOW，导致 OBS 窗口采集枚举不到。
         self.setWindowFlags(
@@ -110,6 +111,7 @@ class Overlay(QWidget):
 
     def set_display_cfg(self, cfg):
         self._display_cfg = dict(cfg)
+        self._return_cursor = bool(cfg.get("return_cursor", True))
 
     def set_wheel_cfg(self, cfg):
         self._wheel_cfg = dict(cfg)
@@ -211,7 +213,7 @@ class Overlay(QWidget):
         dx = cursor.x() - self._wheel_center.x()
         dy = cursor.y() - self._wheel_center.y()
         if self._wheel_style == "sts2":
-            self._wheel.set_hover_index(angle_index(dx, dy, n, centered=True))
+            self._wheel.set_hover_index(angle_index(dx, dy, n))
             # 中心指针跟随鼠标方向，只限制显示长度；不移动物理光标（SetCursorPos 会导致其重新显示）
             pointer_r = self._wheel.radius * 0.16
             dist = math.hypot(dx, dy)
@@ -238,9 +240,11 @@ class Overlay(QWidget):
         if emote is not None:
             self.show_emote(emote)
             self._last_emote = emote
-        self.close_wheel()
+            self.close_wheel(return_cursor=self._return_cursor)
+        else:
+            self.close_wheel()
 
-    def close_wheel(self):
+    def close_wheel(self, return_cursor=False):
         if self._hover_timer is not None:
             self._hover_timer.stop()
             self._hover_timer = None
@@ -254,6 +258,9 @@ class Overlay(QWidget):
             QGuiApplication.restoreOverrideCursor()
             _show_cursor()
             self._cursor_hidden = False
+        if return_cursor and self._wheel_center is not None:
+            # 选择后将物理光标移回呼出位置（此刻光标已恢复可见，不会闪烁）
+            QCursor.setPos(self._wheel_center)
         _apply_click_through(int(self.winId()), True)
 
     def _wheel_visible(self):

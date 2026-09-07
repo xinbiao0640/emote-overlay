@@ -32,6 +32,10 @@
         {
           "file": "emotes/heart.png",
           "name": "爱心"
+        },
+        {
+          "file": "",
+          "name": ""
         }
       ]
     },
@@ -41,6 +45,22 @@
         {
           "file": "emotes/fbjb.png",
           "name": "fbjb"
+        },
+        {
+          "file": "",
+          "name": ""
+        },
+        {
+          "file": "",
+          "name": ""
+        },
+        {
+          "file": "",
+          "name": ""
+        },
+        {
+          "file": "",
+          "name": ""
         }
       ]
     }
