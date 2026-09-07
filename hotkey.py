@@ -1,6 +1,10 @@
-"""全局热键管理，基于 keyboard 库（低层键盘钩子，无需应用获得焦点）。"""
+"""全局热键管理，基于 keyboard 库（低层键盘钩子，无需应用获得焦点）。
+
+注意：keyboard 的回调运行在它自己的监听线程里，不能直接在其中创建 QWidget。
+因此这里用 Qt 信号把触发事件安全地转回主线程（跨线程信号会自动走队列连接）。
+"""
 import keyboard
-from PySide6.QtCore import QThread, Signal
+from PySide6.QtCore import QObject, QThread, Signal
 
 
 class KeyCaptureThread(QThread):
@@ -16,10 +20,12 @@ class KeyCaptureThread(QThread):
             self.keyCaptured.emit("")
 
 
-class HotkeyManager:
-    def __init__(self, on_open=None, on_dismiss=None):
-        self._on_open = on_open
-        self._on_dismiss = on_dismiss
+class HotkeyManager(QObject):
+    openTriggered = Signal()
+    dismissTriggered = Signal()
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
         self._open_handler = None
         self._dismiss_handler = None
 
@@ -27,12 +33,12 @@ class HotkeyManager:
         self.unbind()
         if open_key:
             try:
-                self._open_handler = keyboard.add_hotkey(open_key, self._safe(self._on_open))
+                self._open_handler = keyboard.add_hotkey(open_key, self.openTriggered.emit)
             except Exception:
                 self._open_handler = None
         if dismiss_key:
             try:
-                self._dismiss_handler = keyboard.add_hotkey(dismiss_key, self._safe(self._on_dismiss))
+                self._dismiss_handler = keyboard.add_hotkey(dismiss_key, self.dismissTriggered.emit)
             except Exception:
                 self._dismiss_handler = None
 
@@ -45,14 +51,3 @@ class HotkeyManager:
                     pass
         self._open_handler = None
         self._dismiss_handler = None
-
-    @staticmethod
-    def _safe(fn):
-        """把可能抛异常的回调包装一下，避免钩子线程里异常打断监听。"""
-        def wrapper(*args, **kwargs):
-            try:
-                if fn:
-                    fn()
-            except Exception:
-                pass
-        return wrapper

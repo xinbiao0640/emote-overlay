@@ -1,9 +1,9 @@
 """程序入口：创建透明 overlay、注册全局热键、系统托盘。"""
 import sys
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, QSharedMemory
 from PySide6.QtGui import QIcon, QPixmap, QPainter, QColor, QBrush, QFont
-from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu
+from PySide6.QtWidgets import QApplication, QSystemTrayIcon, QMenu, QMessageBox
 
 import config as config_mod
 from overlay import Overlay
@@ -32,11 +32,19 @@ def main():
     app.setQuitOnLastWindowClosed(False)
     app.setApplicationName("EmoteOverlay")
 
+    # 单实例守卫：避免重复启动导致双 overlay / venv 锁占用
+    guard = QSharedMemory("emote-overlay-single-instance")
+    if not guard.create(1):
+        QMessageBox.information(None, "表情 Overlay", "程序已在运行（请查看系统托盘图标）。")
+        sys.exit(0)
+
     cfg = config_mod.load_config()
 
     overlay = Overlay(cfg)
 
-    hotkeys = HotkeyManager(overlay.toggle_wheel, overlay.close_wheel)
+    hotkeys = HotkeyManager()
+    hotkeys.openTriggered.connect(overlay.toggle_wheel)
+    hotkeys.dismissTriggered.connect(overlay.close_wheel)
     hotkeys.set_hotkeys(cfg.get("hotkey_open"), cfg.get("hotkey_dismiss"))
 
     def apply_config(new_cfg):

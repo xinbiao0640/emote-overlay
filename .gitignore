@@ -16,5 +16,8 @@ build/
 dist/
 *.spec
 
+# Local tools (gh.exe copy)
+.tools/
+
 # Logs
 *.log
