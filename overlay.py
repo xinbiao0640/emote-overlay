@@ -68,8 +68,8 @@ class Overlay(QWidget):
         self.setAttribute(Qt.WA_TranslucentBackground)
         self.setAttribute(Qt.WA_ShowWithoutActivating)
 
-        screen = QGuiApplication.primaryScreen()
-        self.setGeometry(screen.virtualGeometry())
+        self._monitor_index = int(config.get("display", {}).get("monitor", 0))
+        self.setGeometry(self._screen_geometry(self._monitor_index))
 
         self._wheel = None
         self._wheel_center = None
@@ -99,6 +99,19 @@ class Overlay(QWidget):
 
     def set_wheel_cfg(self, cfg):
         self._wheel_cfg = dict(cfg)
+
+    def _screen_geometry(self, index):
+        screens = QGuiApplication.screens()
+        if 0 <= index < len(screens):
+            return screens[index].geometry()
+        return QGuiApplication.primaryScreen().geometry()
+
+    def set_monitor(self, index):
+        """把 overlay 限定到指定显示器（用于让 OBS 采集的窗口和该显示器 1:1 对齐）。"""
+        self._monitor_index = int(index)
+        self.setGeometry(self._screen_geometry(self._monitor_index))
+        if self._emote_display is not None:
+            self._emote_display.setGeometry(self.rect())
 
     # ---- 分组 ----
     def _current_emotes(self):

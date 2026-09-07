@@ -4,7 +4,7 @@ import math
 import os
 
 from PySide6.QtCore import Qt, QSize, QRectF, QPointF, Signal
-from PySide6.QtGui import QPixmap, QMovie, QPainter, QColor, QPen, QBrush
+from PySide6.QtGui import QPixmap, QMovie, QPainter, QColor, QPen, QBrush, QGuiApplication
 from PySide6.QtWidgets import (
     QDialog,
     QVBoxLayout,
@@ -254,6 +254,8 @@ class SettingsDialog(QDialog):
         # 显示参数
         display_box = QGroupBox("显示")
         display_form = QFormLayout(display_box)
+        self._monitor_combo = QComboBox()
+        self._monitor_combo.currentIndexChanged.connect(self._on_monitor_changed)
         self._pos_combo = QComboBox()
         for p in config_mod.POSITIONS:
             self._pos_combo.addItem(config_mod.POSITION_LABELS.get(p, p), p)
@@ -265,6 +267,7 @@ class SettingsDialog(QDialog):
         self._duration_spin.setSingleStep(0.1)
         self._duration_spin.setSuffix(" 秒")
         self._fade_check = QCheckBox("淡入淡出")
+        display_form.addRow("显示器", self._monitor_combo)
         display_form.addRow("弹出位置", self._pos_combo)
         display_form.addRow("表情大小", self._size_spin)
         display_form.addRow("显示时长", self._duration_spin)
@@ -289,6 +292,14 @@ class SettingsDialog(QDialog):
         self._group_combo.blockSignals(False)
 
         d = self._config.get("display", {})
+        self._monitor_combo.blockSignals(True)
+        self._monitor_combo.clear()
+        for i, s in enumerate(QGuiApplication.screens()):
+            g = s.geometry()
+            self._monitor_combo.addItem(f"显示器 {i + 1}（{g.width()}×{g.height()}）", i)
+        self._monitor_combo.setCurrentIndex(int(d.get("monitor", 0)))
+        self._monitor_combo.blockSignals(False)
+
         idx = self._pos_combo.findData(d.get("position", "bottom-center"))
         if idx >= 0:
             self._pos_combo.setCurrentIndex(idx)
@@ -298,6 +309,9 @@ class SettingsDialog(QDialog):
 
         self._selected_index = -1
         self._reload_preview()
+
+    def _on_monitor_changed(self, index):
+        self._config.setdefault("display", {})["monitor"] = index
 
     # ---- 分组 ----
     def _current_group(self):

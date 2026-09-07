@@ -14,6 +14,7 @@ DEFAULT_CONFIG = {
         "size": 120,
         "duration": 2.5,
         "fade": True,
+        "monitor": 0,
     },
     "wheel": {
         "radius": 130,

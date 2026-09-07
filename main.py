@@ -52,6 +52,7 @@ def main():
         config_mod.save_config(new_cfg)
         overlay.set_groups(new_cfg.get("groups", []))
         overlay.set_display_cfg(new_cfg.get("display", {}))
+        overlay.set_monitor(new_cfg.get("display", {}).get("monitor", 0))
         overlay.set_wheel_cfg(new_cfg.get("wheel", {}))
         hotkeys.set_hotkeys(new_cfg.get("hotkey_open"), new_cfg.get("hotkey_dismiss"))
 
