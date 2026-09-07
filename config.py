@@ -10,19 +10,20 @@ DEFAULT_CONFIG = {
     "hotkey_dismiss": "esc",
     "emotes": [],
     "display": {
-        "position": "bottom-center",
-        "size": 220,
+        "position": "cursor",
+        "size": 120,
         "duration": 2.5,
         "fade": True,
     },
     "wheel": {
         "radius": 130,
-        "inner_radius": 45,
+        "inner_radius": 25,
     },
 }
 
 # 显示位置允许的取值
 POSITIONS = [
+    "cursor",
     "center",
     "bottom-center",
     "top-center",
@@ -31,6 +32,17 @@ POSITIONS = [
     "top-left",
     "top-right",
 ]
+
+POSITION_LABELS = {
+    "cursor": "跟随鼠标",
+    "center": "屏幕中心",
+    "bottom-center": "屏幕下方居中",
+    "top-center": "屏幕上方居中",
+    "bottom-left": "左下角",
+    "bottom-right": "右下角",
+    "top-left": "左上角",
+    "top-right": "右上角",
+}
 
 
 def _merge(defaults, data):

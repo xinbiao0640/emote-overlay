@@ -25,16 +25,20 @@
     {
       "name": "哭",
       "file": "emotes/cry.png"
+    },
+    {
+      "name": "1",
+      "file": "emotes/1.png"
     }
   ],
   "display": {
-    "position": "bottom-center",
-    "size": 220,
+    "position": "cursor",
+    "size": 120,
     "duration": 2.5,
     "fade": true
   },
   "wheel": {
     "radius": 130,
-    "inner_radius": 45
+    "inner_radius": 25
   }
 }

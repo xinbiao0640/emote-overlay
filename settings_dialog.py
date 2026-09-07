@@ -93,7 +93,7 @@ class SettingsDialog(QDialog):
         display_form = QFormLayout(display_box)
         self._pos_combo = QComboBox()
         for p in config_mod.POSITIONS:
-            self._pos_combo.addItem(p, p)
+            self._pos_combo.addItem(config_mod.POSITION_LABELS.get(p, p), p)
         self._size_spin = QSpinBox()
         self._size_spin.setRange(64, 512)
         self._size_spin.setSuffix(" px")

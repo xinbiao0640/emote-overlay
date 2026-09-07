@@ -1,8 +1,8 @@
-"""径向表情滚轮：围绕圆心分布表情，鼠标滑动高亮、松开选择。"""
+"""径向表情滚轮：围绕圆心分布表情，高亮索引由 overlay 按鼠标方向角度驱动。"""
 import math
 import os
 
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
+from PySide6.QtCore import Qt, QPointF, QRectF
 from PySide6.QtGui import QPainter, QColor, QPen, QBrush, QPixmap, QMovie
 from PySide6.QtWidgets import QWidget
 
@@ -20,18 +20,29 @@ def _thumbnail(emote):
     return QPixmap(path)
 
 
-class EmoteWheel(QWidget):
-    selected = Signal(object)  # 发送选中的表情 dict，取消则发送 None
+def angle_index(dx, dy, n, inner_radius):
+    """根据鼠标相对滚轮中心的方向向量，计算高亮的表情索引。
 
+    只看方向角度、不限制距离：只要离开中心死区（inner_radius），
+    移动多远都能选中对应方向的表情。死区内返回 -1。
+    """
+    if n == 0 or math.hypot(dx, dy) <= inner_radius:
+        return -1
+    theta = math.degrees(math.atan2(dx, -dy))
+    if theta < 0:
+        theta += 360.0
+    return int(theta // (360.0 / n)) % n
+
+
+class EmoteWheel(QWidget):
     def __init__(self, parent, emotes, wheel_cfg):
         super().__init__(parent)
         self.emotes = list(emotes)
         self.radius = int(wheel_cfg.get("radius", 130))
-        self.inner_radius = int(wheel_cfg.get("inner_radius", 45))
+        self.inner_radius = int(wheel_cfg.get("inner_radius", 25))
         self._hover_index = -1
 
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setMouseTracking(True)
 
         padding = 20
         size = (self.radius + padding) * 2
@@ -40,44 +51,16 @@ class EmoteWheel(QWidget):
 
         self._pixmaps = [_thumbnail(e) for e in self.emotes]
 
-    def current_emote(self):
-        """返回当前鼠标高亮的表情，未高亮则返回 None。"""
-        if 0 <= self._hover_index < len(self.emotes):
-            return self.emotes[self._hover_index]
-        return None
-
-    def _index_at(self, pos):
-        dx = pos.x() - self._center.x()
-        dy = pos.y() - self._center.y()
-        dist = math.hypot(dx, dy)
-        n = len(self.emotes)
-        if n == 0:
-            return -1
-        if dist < self.inner_radius or dist > self.radius + 15:
-            return -1
-        theta = math.degrees(math.atan2(dx, -dy))
-        if theta < 0:
-            theta += 360.0
-        idx = int(theta // (360.0 / n))
-        return idx % n
-
-    def mouseMoveEvent(self, event):
-        idx = self._index_at(event.position())
+    def set_hover_index(self, idx):
         if idx != self._hover_index:
             self._hover_index = idx
             self.update()
 
-    def mouseReleaseEvent(self, event):
-        idx = self._index_at(event.position())
-        self.hide()
-        if idx >= 0:
-            self.selected.emit(self.emotes[idx])
-        else:
-            self.selected.emit(None)
-
-    def leaveEvent(self, event):
-        self._hover_index = -1
-        self.update()
+    def current_emote(self):
+        """返回当前高亮的表情，未高亮则返回 None。"""
+        if 0 <= self._hover_index < len(self.emotes):
+            return self.emotes[self._hover_index]
+        return None
 
     def paintEvent(self, event):
         p = QPainter(self)

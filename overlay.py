@@ -1,11 +1,11 @@
 """全屏透明置顶 overlay：平时点击透传，按热键弹出表情滚轮，选中后弹出表情。"""
 import ctypes
 
-from PySide6.QtCore import Qt, QRect
+from PySide6.QtCore import Qt, QRect, QTimer
 from PySide6.QtGui import QGuiApplication, QCursor
 from PySide6.QtWidgets import QWidget
 
-from wheel import EmoteWheel
+from wheel import EmoteWheel, angle_index
 from emote import EmoteDisplay
 
 GWL_EXSTYLE = -20
@@ -55,6 +55,8 @@ class Overlay(QWidget):
         self.setGeometry(screen.virtualGeometry())
 
         self._wheel = None
+        self._wheel_center = None
+        self._hover_timer = None
         self._emote_display = EmoteDisplay(self)
 
         self.show()
@@ -79,8 +81,8 @@ class Overlay(QWidget):
         if self._wheel_visible():
             return
         _apply_click_through(int(self.winId()), False)
+        self._wheel_center = QCursor.pos()
         self._wheel = EmoteWheel(self, self._emotes, self._wheel_cfg)
-        self._wheel.selected.connect(self._on_wheel_done)
         cursor = QCursor.pos()
         local = self.mapFromGlobal(cursor)
         self._wheel.move(
@@ -89,6 +91,22 @@ class Overlay(QWidget):
         )
         self._wheel.show()
         self._wheel.raise_()
+        # 用定时器轮询鼠标位置，按「方向角度」更新高亮，不限制移动距离
+        self._hover_timer = QTimer(self)
+        self._hover_timer.timeout.connect(self._update_hover)
+        self._hover_timer.start(16)
+
+    def _update_hover(self):
+        if not self._wheel_visible():
+            return
+        n = len(self._emotes)
+        if n == 0:
+            return
+        cursor = QCursor.pos()
+        dx = cursor.x() - self._wheel_center.x()
+        dy = cursor.y() - self._wheel_center.y()
+        inner = int(self._wheel_cfg.get("inner_radius", 25))
+        self._wheel.set_hover_index(angle_index(dx, dy, n, inner))
 
     def release_wheel(self):
         """松开呼出键：选中当前高亮的表情并关闭滚轮。"""
@@ -100,6 +118,9 @@ class Overlay(QWidget):
         self.close_wheel()
 
     def close_wheel(self):
+        if self._hover_timer is not None:
+            self._hover_timer.stop()
+            self._hover_timer = None
         if self._wheel is not None:
             self._wheel.hide()
             self._wheel.deleteLater()
@@ -108,11 +129,6 @@ class Overlay(QWidget):
 
     def _wheel_visible(self):
         return self._wheel is not None and self._wheel.isVisible()
-
-    def _on_wheel_done(self, emote):
-        if emote is not None:
-            self.show_emote(emote)
-        self.close_wheel()
 
     def mousePressEvent(self, event):
         # 滚轮打开时点击空白区域 = 取消
@@ -125,10 +141,15 @@ class Overlay(QWidget):
         self._emote_display.show_emote(emote, rect, self._display_cfg)
 
     def _compute_emote_rect(self) -> QRect:
-        size = int(self._display_cfg.get("size", 220))
+        size = int(self._display_cfg.get("size", 120))
         margin = 40
         w, h = self.width(), self.height()
-        pos = self._display_cfg.get("position", "bottom-center")
+        pos = self._display_cfg.get("position", "cursor")
+        if pos == "cursor":
+            local = self.mapFromGlobal(QCursor.pos())
+            x = int(local.x() - size / 2)
+            y = int(local.y() - size / 2)
+            return QRect(x, y, size, size)
         x = y = 0
         if pos == "center":
             x, y = (w - size) // 2, (h - size) // 2

@@ -1,4 +1,4 @@
-"""离线冒烟测试：验证模块导入、图片加载、滚轮角度计算。用 offscreen 平台，无需真实显示。"""
+"""离线冒烟测试：验证模块导入、图片加载、滚轮角度判定、表情弹出。用 offscreen 平台。"""
 import os
 import sys
 
@@ -7,12 +7,11 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, ROOT)
 
-from PySide6.QtCore import QPointF
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QApplication
 
 import config as config_mod
-from wheel import EmoteWheel
+from wheel import angle_index
 
 
 def main():
@@ -28,19 +27,15 @@ def main():
     assert not pm.isNull(), "示例 PNG 无法加载"
     print("PNG 加载 OK:", pm.width(), "x", pm.height())
 
-    # 3. 滚轮角度计算
-    emotes = [{"name": f"e{i}", "file": sample} for i in range(6)]
-    wheel = EmoteWheel(None, emotes, cfg["wheel"])
-    center = wheel._center
-    # 正上方 -> 索引 0
-    assert wheel._index_at(QPointF(center.x(), center.y() - 100)) == 0
-    # 正右方 -> 索引 1（6 个扇区，每 60°，顺时针：上=0 右=1）
-    assert wheel._index_at(QPointF(center.x() + 100, center.y())) == 1
-    # 正下方 -> 索引 3
-    assert wheel._index_at(QPointF(center.x(), center.y() + 100)) == 3
-    # 中心死区 -> -1
-    assert wheel._index_at(QPointF(center.x(), center.y())) == -1
-    print("滚轮角度计算 OK")
+    # 3. 滚轮角度判定（只看方向角度，不限制距离）
+    n = 6
+    inner = cfg["wheel"]["inner_radius"]
+    assert angle_index(0, -100, n, inner) == 0      # 正上方
+    assert angle_index(100, 0, n, inner) == 1       # 正右方
+    assert angle_index(0, 100, n, inner) == 3       # 正下方
+    assert angle_index(0, 0, n, inner) == -1        # 死区
+    assert angle_index(0, -9999, n, inner) == 0     # 很远仍按方向选中
+    print("滚轮角度判定 OK")
 
     # 4. overlay / emote 模块可导入并构造
     from overlay import Overlay
@@ -50,6 +45,7 @@ def main():
     print("Overlay / EmoteDisplay 构造 OK")
 
     # 5. 表情弹出
+    emotes = [{"name": f"e{i}", "file": sample} for i in range(6)]
     overlay.set_emotes(emotes)
     overlay.show_emote(emotes[0])
     app.processEvents()
@@ -60,7 +56,7 @@ def main():
     overlay.open_wheel()
     app.processEvents()
     assert overlay._wheel_visible(), "滚轮未打开"
-    overlay._wheel._hover_index = 0
+    overlay._wheel.set_hover_index(0)
     assert overlay._wheel.current_emote() is emotes[0]
     overlay.release_wheel()
     app.processEvents()
